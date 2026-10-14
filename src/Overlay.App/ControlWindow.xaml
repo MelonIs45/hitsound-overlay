@@ -1,0 +1,129 @@
+<Window x:Class="Overlay.App.ControlWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="osu! timeline overlay" Width="460" SizeToContent="Height" ResizeMode="CanMinimize"
+        FontSize="13">
+    <StackPanel Margin="14">
+        <Border x:Name="SummaryBorder" BorderThickness="1" CornerRadius="4" Padding="10,7" Margin="0,0,0,12"
+                Background="#FFF8E1" BorderBrush="#FFD54F">
+            <DockPanel>
+                <Button x:Name="StartTosuButton" DockPanel.Dock="Right" Content="Start tosu" Padding="10,2" Margin="8,0,0,0"
+                        VerticalAlignment="Center" Visibility="Collapsed" Click="StartTosuButton_Click"/>
+                <TextBlock x:Name="SummaryText" Text="Starting…" TextWrapping="Wrap" VerticalAlignment="Center"/>
+            </DockPanel>
+        </Border>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="110"/>
+                <ColumnDefinition/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition/><RowDefinition/><RowDefinition/>
+            </Grid.RowDefinitions>
+
+            <TextBlock Text="Time source" VerticalAlignment="Center"/>
+            <ComboBox x:Name="SourceBox" Grid.Column="1" Margin="0,2" SelectionChanged="SourceBox_SelectionChanged">
+                <ComboBoxItem Content="osu! editor (via tosu)"/>
+                <ComboBoxItem Content="Demo (simulated editor)"/>
+            </ComboBox>
+
+            <TextBlock Grid.Row="1" Text="Std difficulty" VerticalAlignment="Center"/>
+            <DockPanel Grid.Row="1" Grid.Column="1" Margin="0,4,0,0">
+                <Button x:Name="OpenButton" DockPanel.Dock="Right" Content="Other…" Padding="8,1" Margin="6,0,0,0"
+                        ToolTip="Show any .osu file" Click="OpenButton_Click"/>
+                <ComboBox x:Name="DifficultyBox" SelectionChanged="DifficultyBox_SelectionChanged"/>
+            </DockPanel>
+            <Button Grid.Row="2" Grid.Column="1" HorizontalAlignment="Left" Margin="0,6,0,0" Padding="10,2"
+                    Content="Use beatmap open in editor"
+                    ToolTip="Pins the difficulty that is open in osu! right now as the std map. Open the std map, press this, then open your mania map."
+                    Click="UseOpenButton_Click"/>
+        </Grid>
+
+        <TextBlock Text="View" FontWeight="SemiBold" Margin="0,14,0,0"/>
+        <Grid Margin="0,4,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="110"/>
+                <ColumnDefinition/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="Show objects" VerticalAlignment="Center"/>
+            <ComboBox x:Name="StyleBox" Grid.Column="1" Margin="0,2" SelectionChanged="StyleBox_SelectionChanged">
+                <ComboBoxItem Content="On osu!'s timeline (as in the std editor)"
+                              ToolTip="Only the objects, drawn onto osu!'s own timeline where the std editor would put them, at the open map's timeline zoom (updates when you save)."/>
+                <ComboBoxItem Content="In the overlay's own strip"
+                              ToolTip="A separate strip with its own background, beat grid, zoom and position."/>
+            </ComboBox>
+        </Grid>
+        <Grid x:Name="StripSettings" Margin="0,4,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="110"/>
+                <ColumnDefinition/>
+                <ColumnDefinition Width="70"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
+            </Grid.RowDefinitions>
+
+            <TextBlock Grid.Row="0" Text="Zoom" VerticalAlignment="Center"/>
+            <Slider x:Name="ZoomSlider" Grid.Row="0" Grid.Column="1" Minimum="0" Maximum="1" Margin="0,4" ValueChanged="ZoomSlider_ValueChanged"/>
+            <TextBlock x:Name="ZoomLabel" Grid.Row="0" Grid.Column="2" VerticalAlignment="Center" Margin="8,0,0,0"/>
+
+            <TextBlock Grid.Row="1" Text="Now line" VerticalAlignment="Center"/>
+            <Slider x:Name="NowSlider" Grid.Row="1" Grid.Column="1" Minimum="0.05" Maximum="0.95" Margin="0,4" ValueChanged="NowSlider_ValueChanged"/>
+            <TextBlock x:Name="NowLabel" Grid.Row="1" Grid.Column="2" VerticalAlignment="Center" Margin="8,0,0,0"/>
+
+            <TextBlock Grid.Row="2" Text="Beat grid" VerticalAlignment="Center"/>
+            <CheckBox x:Name="GridCheck" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Content="Show" VerticalAlignment="Center"
+                      Margin="0,6" Click="GridCheck_Click"
+                      ToolTip="Uses the beat snap of the map open in the editor. osu! saves it with the map, so it updates when you open or save (Ctrl+S)."/>
+
+            <TextBlock Grid.Row="3" Text="Opacity" VerticalAlignment="Center"/>
+            <Slider x:Name="OpacitySlider" Grid.Row="3" Grid.Column="1" Minimum="0.2" Maximum="1" Margin="0,4" ValueChanged="OpacitySlider_ValueChanged"/>
+            <TextBlock x:Name="OpacityLabel" Grid.Row="3" Grid.Column="2" VerticalAlignment="Center" Margin="8,0,0,0"/>
+
+            <TextBlock Grid.Row="4" Text="Background" VerticalAlignment="Center"/>
+            <Slider x:Name="BackgroundSlider" Grid.Row="4" Grid.Column="1" Minimum="0" Maximum="1" Margin="0,4" ValueChanged="BackgroundSlider_ValueChanged"/>
+            <TextBlock x:Name="BackgroundLabel" Grid.Row="4" Grid.Column="2" VerticalAlignment="Center" Margin="8,0,0,0"/>
+
+            <TextBlock Grid.Row="5" Text="Offset" VerticalAlignment="Center"
+                       ToolTip="Latency compensation. Positive moves objects earlier. Calibrate once at 100 %; it scales with playback speed."/>
+            <StackPanel Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,4">
+                <Button Content="−5" Width="34" Tag="-5" Click="Offset_Click"/>
+                <Button Content="−1" Width="34" Tag="-1" Click="Offset_Click" Margin="4,0,0,0"/>
+                <TextBlock x:Name="OffsetLabel" Width="70" TextAlignment="Center" VerticalAlignment="Center"/>
+                <Button Content="+1" Width="34" Tag="1" Click="Offset_Click"/>
+                <Button Content="+5" Width="34" Tag="5" Click="Offset_Click" Margin="4,0,0,0"/>
+            </StackPanel>
+        </Grid>
+
+        <TextBlock Text="Mania playfield" FontWeight="SemiBold" Margin="0,14,0,0"/>
+        <CheckBox x:Name="BarTintCheck" Content="Tint columns with the std map's combo colours" Margin="0,4,0,0" Click="BarTintCheck_Click"/>
+        <DockPanel Margin="0,6,0,0">
+            <TextBlock Text="Tint strength" VerticalAlignment="Center" Width="130"/>
+            <TextBlock x:Name="TintLabel" DockPanel.Dock="Right" Width="50" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            <Slider x:Name="TintSlider" Minimum="0" Maximum="0.5" VerticalAlignment="Center" ValueChanged="TintSlider_ValueChanged"/>
+        </DockPanel>
+        <DockPanel Margin="0,6,0,0">
+            <TextBlock Text="Next colour at columns" VerticalAlignment="Center" Width="130"/>
+            <TextBox x:Name="BarSwitchBox" VerticalAlignment="Center" LostKeyboardFocus="BarSwitchBox_LostKeyboardFocus" KeyDown="BarSwitchBox_KeyDown"
+                     ToolTip="Column numbers, separated by commas (1 = leftmost). The tint steps to the next combo colour at each listed column."/>
+        </DockPanel>
+
+        <CheckBox x:Name="EnabledCheck" Content="Overlay enabled" Margin="0,10,0,0" Click="EnabledCheck_Click"/>
+        <CheckBox x:Name="LayoutCheck" Content="Layout mode (drag / resize the overlay)" Margin="0,6,0,0" Click="LayoutCheck_Click"/>
+        <CheckBox x:Name="DebugCheck" Content="Show debug line on overlay" Margin="0,6,0,0" Click="DebugCheck_Click"/>
+        <CheckBox x:Name="StartInTrayCheck" Content="Start minimised to the tray" Margin="0,6,0,0" Click="StartInTrayCheck_Click"/>
+
+        <Expander Header="Hotkeys" Margin="0,12,0,0">
+            <StackPanel Margin="0,6,0,0">
+                <TextBlock x:Name="HotkeyText" FontFamily="Consolas" FontSize="12"/>
+                <TextBlock x:Name="HotkeyProblems" Foreground="#C62828" TextWrapping="Wrap" Margin="0,6,0,0" Visibility="Collapsed"/>
+                <TextBlock Foreground="Gray" TextWrapping="Wrap" Margin="0,6,0,0" FontSize="12"
+                           Text="Change them in settings.json (%AppData%\OsuTimelineOverlay) and restart."/>
+            </StackPanel>
+        </Expander>
+        <Expander x:Name="DetailsExpander" Header="Details" Margin="0,6,0,0">
+            <TextBlock x:Name="DebugText" FontFamily="Consolas" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap"/>
+        </Expander>
+    </StackPanel>
+</Window>

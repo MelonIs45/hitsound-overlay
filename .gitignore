@@ -1,0 +1,16 @@
+# Build output
+bin/
+obj/
+*.user
+.vs/
+
+# Local shortcut
+*.lnk
+
+# Calibration screenshots and raw recordings (personal; not needed to build or test)
+spikes/**/*.png
+spikes/**/*.json
+spikes/**/*.csv
+spikes/**/*.out
+spikes/timeline/*.ps1.bak
+tests/Overlay.Tests/TestData/tosu-run1.csv
