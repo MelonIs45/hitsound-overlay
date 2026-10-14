@@ -94,3 +94,7 @@ a simulated editor (no osu! needed), `--log <file>` to append frame and clock st
 
 The overlay only reads data: the editor's time and state come from tosu (which reads osu!'s memory, read-only), and
 beatmaps are read from disk. It never writes to osu! or its files, and it's meant for the editor only.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
