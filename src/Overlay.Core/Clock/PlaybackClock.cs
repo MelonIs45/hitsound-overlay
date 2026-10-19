@@ -28,6 +28,8 @@ public sealed class PlaybackClockOptions
     /// </summary>
     public double CatchUpTauMs { get; set; } = 100;
     public double CatchUpSlewFraction { get; set; } = 1.0;
+    /// <summary>After the play/pause key, how long samples that don't show the change yet are ignored.</summary>
+    public double KeyHintGraceMs { get; set; } = 300;
     /// <summary>With no samples for this long, stop extrapolating and hold the last position.</summary>
     public double StaleAfterMs { get; set; } = 1000;
 }
@@ -95,6 +97,25 @@ public sealed class PlaybackClock
             double? resumeFrom = null; // set when this sample confirms that playback started
             hasSample = true;
             last = s;
+
+            // After the play/pause key, samples read before osu! reacted are stale for a moment.
+            if (keyHint != KeyHint.None && s.WallMs - keyHintWall > options.KeyHintGraceMs) keyHint = KeyHint.None;
+            if (keyHint == KeyHint.Play)
+            {
+                // Still the position from before playback started: keep running from the key press.
+                if (s.Paused == true || s.SongTimeMs <= keyHintSong + 1) return;
+                // The first sample since playback started takes over; ease out any small difference.
+                keyHint = KeyHint.None;
+                double shown = ShownAt(lastFrameWall);
+                StartSegment(s);
+                ContinueFrom(shown);
+                return;
+            }
+            if (keyHint == KeyHint.Pause)
+            {
+                if (s.Paused != true && !stalled) return; // still moving: read before the pause took effect
+                keyHint = KeyHint.None; // the paused position: shown exactly below
+            }
 
             if (s.Paused == true || stalled)
             {
@@ -176,17 +197,64 @@ public sealed class PlaybackClock
             while (segment.Count > 2 && s.WallMs - segment[0].WallMs > options.WindowMs) segment.RemoveAt(0);
             Refit();
 
-            if (resumeFrom is { } held)
+            // Playback just started: rather than jumping ahead to where the song already is, start moving from the
+            // held position and catch up quickly.
+            if (resumeFrom is { } held) ContinueFrom(held);
+        }
+    }
+
+    /// <summary>
+    /// The play/pause key (Space in the editor) was pressed at <paramref name="wallMs"/>. Acts on it at once instead of
+    /// waiting for the time source to show the change: starts moving from the shown position, or stops there. For a
+    /// short grace period samples that don't show the change yet are ignored; if the key didn't actually toggle
+    /// playback (e.g. it was typed into a text box), samples correct the display once the grace period ends.
+    /// </summary>
+    public void PlayPauseKeyPressed(double wallMs)
+    {
+        lock (gate)
+        {
+            if (!hasSample) return;
+            keyHintWall = wallMs;
+            pendingResume = null;
+            if (frozen)
             {
-                // Playback just started: rather than jumping ahead to where the song already is, start moving from
-                // the held position and catch up quickly (GetTime eases displayPhase towards targetPhase).
-                if (!double.IsNaN(lastFrameWall))
-                {
-                    displayPhase = Math.Min(targetPhase, held - rate * (lastFrameWall + OffsetMs - segmentStartWall));
-                    catchingUp = displayPhase < targetPhase;
-                }
+                keyHint = KeyHint.Play;
+                keyHintSong = frozenSong;
+                frozen = false;
+                segment.Clear();
+                segmentStartWall = wallMs;
+                // Continuous with the held position: shown(t) = held + rate * (t - wallMs).
+                targetPhase = displayPhase = frozenSong - rate * OffsetMs;
+                catchingUp = false;
+            }
+            else
+            {
+                keyHint = KeyHint.Pause;
+                frozenSong = ShownAt(wallMs);
+                frozen = true;
+                segment.Clear();
             }
         }
+    }
+
+    private enum KeyHint { None, Play, Pause }
+    private KeyHint keyHint;
+    private double keyHintWall, keyHintSong;
+
+    /// <summary>The position the display shows at <paramref name="wallMs"/> (without advancing the easing).</summary>
+    private double ShownAt(double wallMs)
+    {
+        if (frozen) return frozenSong;
+        double t = Math.Min(wallMs + OffsetMs, last.WallMs + options.StaleAfterMs);
+        return displayPhase + rate * (t - segmentStartWall);
+    }
+
+    /// <summary>Keeps the display continuous at <paramref name="shown"/> and eases it onto the new estimate quickly.</summary>
+    private void ContinueFrom(double shown)
+    {
+        if (double.IsNaN(lastFrameWall)) return;
+        displayPhase = shown - rate * (lastFrameWall + OffsetMs - segmentStartWall);
+        catchingUp = displayPhase != targetPhase;
     }
 
     /// <summary>The display is catching up after playback started (eases faster than usual).</summary>

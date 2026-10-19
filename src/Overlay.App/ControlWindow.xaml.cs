@@ -53,6 +53,7 @@ public partial class ControlWindow : Window
         BackgroundSlider.Value = settings.BackgroundOpacity;
         DebugCheck.IsChecked = settings.ShowDebug;
         EnabledCheck.IsChecked = settings.Enabled;
+        SpaceKeyCheck.IsChecked = settings.UseSpaceKey;
         StartInTrayCheck.IsChecked = settings.StartInTray;
         LayoutCheck.IsChecked = app.Overlay?.LayoutMode == true;
         StyleBox.SelectedIndex = settings.Style == TimelineStyle.OsuTimeline ? 0 : 1;
@@ -229,6 +230,8 @@ public partial class ControlWindow : Window
             .Where(n => n > 0).Distinct().OrderBy(n => n).ToArray();
         BarSwitchBox.Text = string.Join(", ", settings.ManiaColumnColourSwitches);
     });
+
+    private void SpaceKeyCheck_Click(object sender, RoutedEventArgs e) => Changed(() => settings.UseSpaceKey = SpaceKeyCheck.IsChecked == true);
 
     private void EnabledCheck_Click(object sender, RoutedEventArgs e) => Changed(() => settings.Enabled = EnabledCheck.IsChecked == true);
 

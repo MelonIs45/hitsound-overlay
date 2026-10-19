@@ -46,6 +46,8 @@ public sealed class AppController : IDisposable
     public OverlaySettings Settings { get; } = SettingsStore.Load(SettingsStore.DefaultPath);
     public TrayIcon Tray { get; }
     public HotkeyManager Hotkeys { get; }
+    /// <summary>Space (play/pause) presses in osu!'s editor, so playback starts and stops on the overlay at once.</summary>
+    public SpaceKeyWatcher SpaceKey { get; }
     public TimelineRenderer Renderer { get; }
     public OverlayHost Overlay { get; }
     /// <summary>Second click-through window over the mania playfield, for the bar tint.</summary>
@@ -74,6 +76,9 @@ public sealed class AppController : IDisposable
         Tray.ToggleEnabled += () => OnHotkey(HotkeyAction.ToggleOverlay);
         Tray.ToggleLayout += () => OnHotkey(HotkeyAction.LayoutMode);
         Tray.Exit += () => System.Windows.Application.Current.Shutdown();
+
+        SpaceKey = new SpaceKeyWatcher(wall);
+        SpaceKey.Pressed += wallMs => clock.PlayPauseKeyPressed(wallMs);
 
         Hotkeys = new HotkeyManager(Control);
         Hotkeys.Pressed += OnHotkey;
@@ -436,6 +441,7 @@ public sealed class AppController : IDisposable
     {
         osu.Update();
         if (followTicks++ % 10 == 0) UpdateStatusSurfaces();
+        SpaceKey.Active = Settings.UseSpaceKey && Settings.Source == TimeSourceKind.Tosu && status.InEditor && osu.OsuInForeground;
         double now = wall.Elapsed.TotalMilliseconds;
 
         bool want = Overlay.LayoutMode
@@ -617,6 +623,7 @@ public sealed class AppController : IDisposable
     {
         SaveNow();
         Hotkeys.Dispose();
+        SpaceKey.Dispose();
         Tray.Dispose();
         statsLog?.Dispose();
         followTimer.Stop();

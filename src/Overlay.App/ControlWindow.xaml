@@ -110,6 +110,8 @@
         </DockPanel>
 
         <CheckBox x:Name="EnabledCheck" Content="Overlay enabled" Margin="0,10,0,0" Click="EnabledCheck_Click"/>
+        <CheckBox x:Name="SpaceKeyCheck" Content="Start / stop the moment Space is pressed in the editor" Margin="0,6,0,0" Click="SpaceKeyCheck_Click"
+                  ToolTip="Watches only the Space key, only while osu!'s editor has focus, so playback starts and stops on the overlay without waiting for tosu."/>
         <CheckBox x:Name="LayoutCheck" Content="Layout mode (drag / resize the overlay)" Margin="0,6,0,0" Click="LayoutCheck_Click"/>
         <CheckBox x:Name="DebugCheck" Content="Show debug line on overlay" Margin="0,6,0,0" Click="DebugCheck_Click"/>
         <CheckBox x:Name="StartInTrayCheck" Content="Start minimised to the tray" Margin="0,6,0,0" Click="StartInTrayCheck_Click"/>

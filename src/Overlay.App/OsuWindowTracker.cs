@@ -18,6 +18,8 @@ public sealed class OsuWindowTracker
     /// <summary>osu! is the foreground window, or one of this app's windows is (so adjusting settings doesn't hide the overlay).</summary>
     public bool OsuOrUsInForeground { get; private set; }
     public bool OsuRunning => hwnd != 0;
+    /// <summary>osu! itself is the foreground window (keys typed now go to osu!).</summary>
+    public bool OsuInForeground { get; private set; }
 
     public void Update()
     {
@@ -40,6 +42,7 @@ public sealed class OsuWindowTracker
         {
             ClientRect = null;
             OsuOrUsInForeground = false;
+            OsuInForeground = false;
             return;
         }
 
@@ -51,5 +54,6 @@ public sealed class OsuWindowTracker
 
         GetWindowThreadProcessId(GetForegroundWindow(), out uint fgProcess);
         OsuOrUsInForeground = fgProcess == osuProcessId || fgProcess == ownProcessId;
+        OsuInForeground = fgProcess == osuProcessId;
     }
 }

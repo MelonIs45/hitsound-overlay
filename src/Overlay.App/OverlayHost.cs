@@ -226,6 +226,7 @@ public sealed class OverlayHost : IDisposable
 
         int w = 0, h = 0;
         uint surfaceDpi = 0;
+        bool mustDraw = true;
         IDCompositionSurface? surface = null;
         try
         {
@@ -250,13 +251,28 @@ public sealed class OverlayHost : IDisposable
                     surface?.Dispose();
                     dcomp.CreateSurface((uint)w, (uint)h, Format.B8G8R8A8_UNorm, Vortice.DXGI.AlphaMode.Premultiplied, out surface).CheckError();
                     visual.SetContent(surface);
+                    mustDraw = true; // a new surface starts empty
                 }
 
-                if (!visible) Thread.Sleep(50); // nothing on screen; just keep the content current
+                // Nothing on screen: don't draw (the first frame after showing again is drawn fresh).
+                if (!visible)
+                {
+                    mustDraw = true;
+                    Thread.Sleep(50);
+                    continue;
+                }
+
+                float scale = surfaceDpi / 96f;
+                // Static content (the column tint) only needs drawing when it changes; the surface keeps showing it.
+                if (!mustDraw && !renderer.NeedsRedraw(w / scale, h / scale))
+                {
+                    WaitForCompositorFrame();
+                    continue;
+                }
+                mustDraw = false;
 
                 // Draw into the surface. It may be part of a larger shared texture, so draw at the given offset and
                 // clip to our area (Clear would otherwise wipe neighbouring content).
-                float scale = surfaceDpi / 96f;
                 using (var dxgiSurface = surface!.BeginDraw<IDXGISurface>(null, out var offset))
                 using (var bitmap = dc.CreateBitmapFromDxgiSurface(dxgiSurface, new BitmapProperties1(
                     new Vortice.DCommon.PixelFormat(Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Premultiplied),

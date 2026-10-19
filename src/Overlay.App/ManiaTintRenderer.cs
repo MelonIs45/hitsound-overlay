@@ -24,9 +24,18 @@ public sealed class ManiaTintRenderer : IOverlayRenderer
     public volatile IReadOnlyList<Rgb>? Colours;
     public bool ShowLayoutFrame { get; set; }
 
+    /// <summary>What the last frame showed; the tint is static, so frames are only drawn when this changes.</summary>
+    private (int Keys, IReadOnlyList<Rgb>? Colours, double Opacity, string Switches, float W, float H) drawn;
+
+    private (int, IReadOnlyList<Rgb>?, double, string, float, float) State(float w, float h) =>
+        (Keys, Colours, settings.ManiaColumnTintOpacity, string.Join(",", settings.ManiaColumnColourSwitches), w, h);
+
+    public bool NeedsRedraw(float w, float h) => State(w, h) != drawn;
+
     public void Render(ID2D1DeviceContext dc, float w, float h)
     {
         if (!ReferenceEquals(brushOwner, dc)) { DisposeBrushes(); brushOwner = dc; }
+        drawn = State(w, h);
         dc.Clear(new Color4(0, 0, 0, 0));
 
         int keys = Keys;
@@ -69,4 +78,6 @@ public interface IOverlayRenderer : IDisposable
     /// <summary>Draws a frame; <paramref name="w"/> and <paramref name="h"/> are the window's size in DIPs.</summary>
     void Render(ID2D1DeviceContext dc, float w, float h);
     bool ShowLayoutFrame { get; set; }
+    /// <summary>Whether the content would differ from the last frame drawn (static content can skip frames).</summary>
+    bool NeedsRedraw(float w, float h) => true;
 }

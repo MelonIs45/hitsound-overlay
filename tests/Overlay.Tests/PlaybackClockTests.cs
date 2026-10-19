@@ -212,6 +212,65 @@ public class PlaybackClockTests(ITestOutputHelper output)
         Assert.Equal(0, clock.SeekCount);
     }
 
+    /// <summary>Feeds samples and the play/pause key at their wall times, recording what's shown every frame.</summary>
+    private static List<(double Wall, double Shown)> RunWithKeys(PlaybackClock clock, IList<TimeSample> samples, double[] keyPresses, double untilMs)
+    {
+        var frames = new List<(double Wall, double Shown)>();
+        int next = 0, nextKey = 0;
+        for (double f = 0; f < untilMs; f += FrameMs)
+        {
+            while (nextKey < keyPresses.Length && keyPresses[nextKey] <= f) clock.PlayPauseKeyPressed(keyPresses[nextKey++]);
+            while (next < samples.Count && samples[next].WallMs <= f) clock.AddSample(samples[next++]);
+            frames.Add((f, clock.GetTime(f)));
+        }
+        return frames;
+    }
+
+    [Fact]
+    public void Play_key_starts_motion_at_once_and_samples_take_over_smoothly()
+    {
+        // Paused at 10 000. Space at wall 1000; osu! starts playing then, and tosu shows it from its read at 1060
+        // (delivered at 1080), so the samples at 1000 and earlier still show the paused position.
+        var samples = new List<TimeSample>();
+        for (double w = 0; w <= 1000; w += 100) samples.Add(new TimeSample(10_000, w + 20, w < 1000 ? true : false));
+        for (double w = 1060; w < 4000; w += 100) samples.Add(new TimeSample(10_000 + (w - 1000), w + 20, false));
+        var frames = RunWithKeys(new PlaybackClock { OffsetMs = 20 }, samples, new[] { 1000.0 }, 4000);
+
+        // Moving from the very first frame after the key, with no jump at any point.
+        var afterKey = frames.Where(f => f.Wall > 1000).ToList();
+        Assert.True(afterKey[1].Shown > 10_000, "should move right after the key press");
+        var withData = frames.Where(f => f.Wall > 100).ToList(); // before the first sample there is nothing to show
+        foreach (var (a, b) in withData.Zip(withData.Skip(1)))
+            Assert.InRange((b.Shown - a.Shown) / (b.Wall - a.Wall), 0, 2.0 + 1e-6);
+        // And in step with the song (truth: 10 000 + (t - 1000)).
+        Assert.All(frames.Where(f => f.Wall > 1000 && f.Wall < 4000), f => Assert.InRange(f.Shown - (10_000 + f.Wall - 1000), -25, 25));
+        Assert.All(frames.Where(f => f.Wall > 2000 && f.Wall < 4000), f => Assert.InRange(f.Shown - (10_000 + f.Wall - 1000), -3, 3));
+    }
+
+    [Fact]
+    public void Pause_key_stops_at_once_and_the_paused_sample_sets_the_exact_position()
+    {
+        // Playing at 1x from 10 000 (wall 0). Space at wall 3000; tosu still reports motion until its read at 3060.
+        var samples = new List<TimeSample>();
+        for (double w = 0; w < 3060; w += 100) samples.Add(new TimeSample(10_000 + w, w + 20, false));
+        for (double w = 3060; w < 4500; w += 100) samples.Add(new TimeSample(13_000, w + 20, true));
+        var frames = RunWithKeys(new PlaybackClock { OffsetMs = 20 }, samples, new[] { 3000.0 }, 4500);
+
+        var stopped = frames.Where(f => f.Wall >= 3000 && f.Wall < 3080).Select(f => f.Shown).Distinct().ToList();
+        Assert.Single(stopped); // holds still from the key press, ignoring the late moving sample
+        Assert.InRange(stopped[0], 13_000 - 15, 13_000 + 15);
+        Assert.All(frames.Where(f => f.Wall > 3100), f => Assert.Equal(13_000, f.Shown, 3)); // then exact
+    }
+
+    [Fact]
+    public void Play_key_that_did_not_start_playback_is_corrected_after_the_grace_period()
+    {
+        // Space typed somewhere osu! didn't treat as play: the time never moves.
+        var samples = Enumerable.Range(0, 30).Select(i => new TimeSample(10_000, i * 100 + 20, true)).ToList();
+        var frames = RunWithKeys(new PlaybackClock(), samples, new[] { 1000.0 }, 3000);
+        Assert.All(frames.Where(f => f.Wall > 1500), f => Assert.Equal(10_000, f.Shown, 3));
+    }
+
     [Fact]
     public void Holds_position_when_the_source_goes_quiet()
     {
