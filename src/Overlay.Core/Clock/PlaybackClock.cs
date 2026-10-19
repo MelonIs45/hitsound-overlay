@@ -101,6 +101,7 @@ public sealed class PlaybackClock
                 frozen = true;
                 frozenSong = s.SongTimeMs;
                 segment.Clear();
+                pendingResume = null; // a forward move followed by a standstill was a seek
                 return;
             }
 
@@ -109,22 +110,36 @@ public sealed class PlaybackClock
                 // Playback never moves backwards, so this is a seek (or osu!'s small nudge on pause) while still paused.
                 if (frozenSong - s.SongTimeMs > options.SeekBaseMs) { SeekCount++; LastSeekWallMs = s.WallMs; }
                 frozenSong = s.SongTimeMs;
+                pendingResume = null;
                 return;
             }
 
             if (frozen || first)
             {
-                // Playback (re)started: begin a new segment, assuming the previous speed until samples say otherwise.
-                // Without a pause flag, a jump further than playback could have moved since the last sample
-                // is a seek made while paused.
-                if (!first && s.SongTimeMs - frozenSong > SeekThreshold + rate * sinceLastSample)
+                // Moved forward from a standstill: either playback started, or a seek made while paused (tosu reports
+                // the sample after a seek as unpaused, so the flag can't tell them apart). Show the new position exactly
+                // and hold it; playback resumes only once the next sample has advanced at a playback speed, starting
+                // from this sample so no time is lost. Otherwise a forward seek would drift ahead and snap back.
+                if (pendingResume is { } start && IsPlaybackSpeed(start, s))
                 {
-                    SeekCount++;
-                    LastSeekWallMs = s.WallMs;
+                    frozen = false;
+                    pendingResume = null;
+                    StartSegment(start);
+                    // Fall through: s is the new segment's second sample.
                 }
-                frozen = false;
-                StartSegment(s);
-                return;
+                else
+                {
+                    // A jump further than playback could have moved since the last sample is certainly a seek.
+                    if (!first && s.SongTimeMs - frozenSong > SeekThreshold + rate * sinceLastSample)
+                    {
+                        SeekCount++;
+                        LastSeekWallMs = s.WallMs;
+                    }
+                    frozen = true;
+                    frozenSong = s.SongTimeMs;
+                    pendingResume = s;
+                    return;
+                }
             }
 
             double predicted = targetPhase + rate * (s.WallMs - segmentStartWall);
@@ -156,6 +171,16 @@ public sealed class PlaybackClock
     }
 
     private double SeekThreshold => options.SeekBaseMs + options.SeekPerRateMs * rate;
+
+    /// <summary>A forward move from a standstill, waiting for the next sample to show whether playback started.</summary>
+    private TimeSample? pendingResume;
+
+    /// <summary>Whether the song advanced between two samples at a rate the editor can play at.</summary>
+    private static bool IsPlaybackSpeed(TimeSample a, TimeSample b)
+    {
+        double speed = (b.SongTimeMs - a.SongTimeMs) / Math.Max(1, b.WallMs - a.WallMs);
+        return speed > 0.1 && speed < 1.6;
+    }
 
     private void StartSegment(TimeSample s)
     {

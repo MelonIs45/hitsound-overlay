@@ -150,6 +150,49 @@ public class PlaybackClockTests(ITestOutputHelper output)
         Assert.True(Stats(frames.Where(f => f.Wall > 8_000), "20% dropped, heavy jitter").max < 3);
     }
 
+    /// <summary>
+    /// Scrolling the timeline while paused, as tosu reports it: the sample after each seek says "not paused" (seen in
+    /// every scroll in the M0 recording), the next ones "paused". Forward and backward scrolls must both snap to the
+    /// new position and stay there, without drifting ahead as if playback had started.
+    /// </summary>
+    [Fact]
+    public void Scrolling_while_paused_snaps_both_ways_without_drift()
+    {
+        var clock = new PlaybackClock();
+        double wall = 0;
+        var shown = new List<(double Wall, double Shown, double Expected)>();
+        void Sample(double song, bool paused)
+        {
+            clock.AddSample(new TimeSample(song, wall, paused));
+            // Frames until the next sample, 100 ms later.
+            for (double f = wall; f < wall + 100; f += FrameMs) shown.Add((f, clock.GetTime(f), song));
+            wall += 100;
+        }
+
+        for (int i = 0; i < 5; i++) Sample(10_000, paused: true);
+        foreach (double target in new[] { 10_083, 10_167, 10_250, 10_167, 10_083, 10_250, 10_333 })
+        {
+            Sample(target, paused: false); // the jump sample, flagged as unpaused
+            Sample(target, paused: true);
+            Sample(target, paused: true);
+        }
+
+        foreach (var (f, s, expected) in shown) Assert.True(Math.Abs(s - expected) < 0.001, $"at {f} ms showed {s}, expected {expected}");
+    }
+
+    [Fact]
+    public void Playback_starts_one_sample_after_moving_from_a_standstill_then_tracks()
+    {
+        var clock = new PlaybackClock();
+        for (int i = 0; i < 5; i++) clock.AddSample(new TimeSample(10_000, i * 100, true));
+        // Play pressed just before wall 500: the song advances at 1x from then on.
+        for (int i = 5; i < 30; i++) clock.AddSample(new TimeSample(10_000 + (i * 100 - 495), i * 100, false));
+        double at = 2950;
+        Assert.InRange(clock.GetTime(at), 10_000 + (at - 495) - 5, 10_000 + (at - 495) + 5);
+        Assert.Equal(1.0, clock.Debug.Rate);
+        Assert.Equal(0, clock.SeekCount);
+    }
+
     [Fact]
     public void Holds_position_when_the_source_goes_quiet()
     {
