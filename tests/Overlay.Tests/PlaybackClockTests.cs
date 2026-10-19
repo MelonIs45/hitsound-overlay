@@ -278,18 +278,33 @@ public class PlaybackClockTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void Pause_key_stops_at_once_and_the_paused_sample_sets_the_exact_position()
+    public void Pause_key_stops_where_osu_stops_without_snapping()
     {
-        // Playing at 1x from 10 000 (wall 0). Space at wall 3000; tosu still reports motion until its read at 3060.
+        // Playing at 1x from 10 000 (wall 0). Space at wall 3000; like osu!, playback actually stops 36 ms later (at
+        // 13 036), and tosu reports motion until its read at 3060, then the paused position.
         var samples = new List<TimeSample>();
-        for (double w = 0; w < 3060; w += 100) samples.Add(new TimeSample(10_000 + w, w + 20, false));
-        for (double w = 3060; w < 4500; w += 100) samples.Add(new TimeSample(13_000, w + 20, true));
+        for (double w = 0; w < 3060; w += 100) samples.Add(new TimeSample(10_000 + Math.Min(w, 3036), w + 20, false));
+        for (double w = 3060; w < 4500; w += 100) samples.Add(new TimeSample(13_036, w + 20, true));
         var frames = RunWithKeys(new PlaybackClock { OffsetMs = 20 }, samples, new[] { 3000.0 }, 4500);
 
-        var stopped = frames.Where(f => f.Wall >= 3000 && f.Wall < 3080).Select(f => f.Shown).Distinct().ToList();
-        Assert.Single(stopped); // holds still from the key press, ignoring the late moving sample
-        Assert.InRange(stopped[0], 13_000 - 15, 13_000 + 15);
-        Assert.All(frames.Where(f => f.Wall > 3100), f => Assert.Equal(13_000, f.Shown, 3)); // then exact
+        // Keeps moving until osu! stops, then holds, ignoring the late moving sample.
+        Assert.True(frames.First(f => f.Wall > 3010).Shown > frames.First(f => f.Wall > 3000).Shown, "should still move just after the key");
+        var held = frames.Where(f => f.Wall >= 3040 && f.Wall < 3080).Select(f => f.Shown).Distinct().ToList();
+        Assert.Single(held);
+        // Stops within a few ms of where osu! stopped, so the exact paused sample barely moves it.
+        Assert.InRange(held[0], 13_036 - 8, 13_036 + 25); // (+20 ms offset compensates the source's display lag)
+        Assert.All(frames.Where(f => f.Wall > 3100), f => Assert.Equal(13_036, f.Shown, 3));
+        foreach (var (a, b) in frames.Zip(frames.Skip(1)).Where(p => p.First.Wall > 2500 && p.First.Wall < 3090))
+            Assert.True(b.Shown >= a.Shown, $"moved backwards at {b.Wall} ms");
+    }
+
+    [Fact]
+    public void Play_again_before_the_pause_takes_effect_keeps_playing()
+    {
+        var samples = Enumerable.Range(0, 50).Select(i => new TimeSample(10_000 + i * 100, i * 100 + 20, false)).ToList();
+        var frames = RunWithKeys(new PlaybackClock(), samples, new[] { 3000.0, 3010.0 }, 5000);
+        foreach (var (a, b) in frames.Zip(frames.Skip(1)).Where(p => p.First.Wall > 2500))
+            Assert.True(b.Shown > a.Shown, $"stopped at {b.Wall} ms");
     }
 
     [Fact]

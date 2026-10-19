@@ -55,6 +55,8 @@ public sealed class TimelineRenderer : IOverlayRenderer
     public volatile string? Message;
 
     public FrameStats Stats { get; } = new();
+    /// <summary>Optional diagnostics: called with (wall time, shown song time) for every frame drawn.</summary>
+    public Action<double, double>? FrameTrace { get; set; }
     public double LastShownTime { get; private set; }
     public double LastError { get; private set; } = double.NaN;
 
@@ -112,6 +114,7 @@ public sealed class TimelineRenderer : IOverlayRenderer
         clock!.OffsetMs = settings.OffsetMs;
         double now = clock.GetTime(wallMs);
         LastShownTime = now;
+        FrameTrace?.Invoke(wallMs, now);
         var (from, to) = layout.VisibleRange(now, marginPx: r * 2);
 
         if (editor == null && settings.ShowGrid) DrawGrid(dc, s!, layout, now, from, to, h);

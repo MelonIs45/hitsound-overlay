@@ -34,6 +34,7 @@ public partial class App : Application
         for (int i = 0; i < e.Args.Length; i++)
         {
             if (e.Args[i] == "--log" && i + 1 < e.Args.Length) controller.StartStatsLog(e.Args[++i]);
+            else if (e.Args[i] == "--trace" && i + 1 < e.Args.Length) controller.StartTrace(e.Args[++i]);
             else if (e.Args[i] == "--demo") controller.SetSource(TimeSourceKind.Demo);
             else if (File.Exists(e.Args[i])) controller.OpenFile(e.Args[i]);
         }

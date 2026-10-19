@@ -33,6 +33,11 @@ public sealed class PlaybackClockOptions
     /// scrolling, tosu reports paused every 3–4 samples; during playback never.
     /// </summary>
     public double PausedFlagQuietMs { get; set; } = 450;
+    /// <summary>
+    /// How long osu! keeps playing after the pause key before it stops (measured 31, 36, 41 ms on the dev laptop);
+    /// the display keeps moving for this long so it stops where osu! does.
+    /// </summary>
+    public double PauseKeyLatencyMs { get; set; } = 36;
     /// <summary>After the play/pause key, how long samples that don't show the change yet are ignored.</summary>
     public double KeyHintGraceMs { get; set; } = 300;
     /// <summary>With no samples for this long, stop extrapolating and hold the last position.</summary>
@@ -91,10 +96,14 @@ public sealed class PlaybackClock
 
     public double LastSeekWallMs { get; private set; } = double.NaN;
 
+    /// <summary>Optional diagnostics: called with a line for every sample and play/pause key event.</summary>
+    public Action<string>? Trace { get; set; }
+
     public void AddSample(TimeSample s)
     {
         lock (gate)
         {
+            Trace?.Invoke($"sample wall {s.WallMs:F1} song {s.SongTimeMs} paused {s.Paused} (before: frozen {frozen} hint {keyHint})");
             if (hasSample && s.WallMs < last.WallMs) return; // out of order
             bool stalled = hasSample && s.SongTimeMs == last.SongTimeMs;
             bool first = !hasSample;
@@ -136,6 +145,7 @@ public sealed class PlaybackClock
                 frozenSong = s.SongTimeMs;
                 segment.Clear();
                 pendingResume = null; // a forward move followed by a standstill was a seek
+                pauseAtWall = null;   // the exact paused position is known now
                 return;
             }
 
@@ -223,8 +233,16 @@ public sealed class PlaybackClock
         lock (gate)
         {
             if (!hasSample) return;
+            Trace?.Invoke($"key   wall {wallMs:F1} -> {(frozen ? "play" : "pause")} at shown {ShownAt(wallMs):F1}");
             keyHintWall = wallMs;
             pendingResume = null;
+            if (pauseAtWall != null)
+            {
+                // Play again before the pause took effect: carry on as if it never happened.
+                pauseAtWall = null;
+                keyHint = KeyHint.None;
+                return;
+            }
             if (frozen)
             {
                 keyHint = KeyHint.Play;
@@ -238,13 +256,16 @@ public sealed class PlaybackClock
             }
             else
             {
+                // osu! keeps playing briefly after the key before it actually stops (measured 31–41 ms), so keep moving
+                // until then (GetTime freezes at that moment), rather than stopping short and snapping forward.
                 keyHint = KeyHint.Pause;
-                frozenSong = ShownAt(wallMs);
-                frozen = true;
-                segment.Clear();
+                pauseAtWall = wallMs + options.PauseKeyLatencyMs;
             }
         }
     }
+
+    /// <summary>After the pause key: when to stop (osu! stops a little after the key).</summary>
+    private double? pauseAtWall;
 
     private enum KeyHint { None, Play, Pause }
     private KeyHint keyHint;
@@ -373,6 +394,14 @@ public sealed class PlaybackClock
         lock (gate)
         {
             if (!hasSample) return 0;
+            if (!frozen && pauseAtWall is { } pauseAt && wallMs >= pauseAt)
+            {
+                // The pause key's moment has come: stop where the song is at that time.
+                frozenSong = ShownAt(pauseAt);
+                frozen = true;
+                segment.Clear();
+                pauseAtWall = null;
+            }
             if (frozen) { lastFrameWall = wallMs; return frozenSong; }
 
             if (double.IsNaN(lastFrameWall)) displayPhase = targetPhase; // nothing shown yet, so nothing to ease from

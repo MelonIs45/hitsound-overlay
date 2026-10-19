@@ -190,6 +190,7 @@ public sealed class AppController : IDisposable
     {
         clock = new PlaybackClock();
         Renderer.Clock = clock;
+        AttachTraceToClock();
     }
 
     /// <summary>Runs a simulated editor session over the current map, for trying the overlay without osu!.</summary>
@@ -598,6 +599,45 @@ public sealed class AppController : IDisposable
         var f = Renderer.Stats;
         sb.Append($"frames     {f.Fps} fps, max gap {f.MaxFrameGapMs:F1} ms, render {f.AvgRenderMs:F2} / {f.MaxRenderMs:F2} ms");
         return sb.ToString();
+    }
+
+    private readonly object traceLock = new();
+    private readonly Queue<(double Wall, string Line)> traceRing = new();
+    private string? tracePath;
+
+    /// <summary>
+    /// Diagnostics: keeps the last few seconds of frames and samples, and after each Space press writes the stretch from
+    /// 0.5 s before to 1.5 s after it to <paramref name="path"/>.
+    /// </summary>
+    public void StartTrace(string path)
+    {
+        tracePath = path;
+        Renderer.FrameTrace = (wallMs, shown) => AddTrace(wallMs, $"frame wall {wallMs:F1} shown {shown:F1}");
+        SpaceKey.Pressed += wallMs => Task.Delay(1500).ContinueWith(_ => DumpTrace(wallMs));
+        AttachTraceToClock();
+    }
+
+    private void AttachTraceToClock()
+    {
+        if (tracePath != null) clock.Trace = line => AddTrace(wall.Elapsed.TotalMilliseconds, line);
+    }
+
+    private void AddTrace(double wallMs, string line)
+    {
+        lock (traceLock)
+        {
+            traceRing.Enqueue((wallMs, line));
+            while (traceRing.Count > 0 && wallMs - traceRing.Peek().Wall > 5000) traceRing.Dequeue();
+        }
+    }
+
+    private void DumpTrace(double keyWall)
+    {
+        List<string> lines;
+        lock (traceLock)
+            lines = traceRing.Where(e => e.Wall >= keyWall - 500 && e.Wall <= keyWall + 1500).Select(e => e.Line).ToList();
+        File.AppendAllText(tracePath!, $"=== Space at {keyWall:F1} (offset {Settings.OffsetMs} ms){Environment.NewLine}" +
+            string.Join(Environment.NewLine, lines) + Environment.NewLine);
     }
 
     private System.Threading.Timer? statsLog;
