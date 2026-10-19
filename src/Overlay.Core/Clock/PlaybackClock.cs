@@ -22,6 +22,12 @@ public sealed class PlaybackClockOptions
     public double SmoothingTauMs { get; set; } = 250;
     /// <summary>Easing never changes the displayed speed by more than this fraction, so motion stays monotonic.</summary>
     public double MaxSlewFraction { get; set; } = 0.05;
+    /// <summary>
+    /// When playback starts, the display starts moving from where it was held and catches up with the song this fast:
+    /// time constant, and how much faster than the playback speed it may move (1 = up to double speed).
+    /// </summary>
+    public double CatchUpTauMs { get; set; } = 100;
+    public double CatchUpSlewFraction { get; set; } = 1.0;
     /// <summary>With no samples for this long, stop extrapolating and hold the last position.</summary>
     public double StaleAfterMs { get; set; } = 1000;
 }
@@ -86,6 +92,7 @@ public sealed class PlaybackClock
             bool stalled = hasSample && s.SongTimeMs == last.SongTimeMs;
             bool first = !hasSample;
             double sinceLastSample = first ? 0 : s.WallMs - last.WallMs;
+            double? resumeFrom = null; // set when this sample confirms that playback started
             hasSample = true;
             last = s;
 
@@ -122,6 +129,7 @@ public sealed class PlaybackClock
                 // from this sample so no time is lost. Otherwise a forward seek would drift ahead and snap back.
                 if (pendingResume is { } start && IsPlaybackSpeed(start, s))
                 {
+                    resumeFrom = frozenSong;
                     frozen = false;
                     pendingResume = null;
                     StartSegment(start);
@@ -167,8 +175,22 @@ public sealed class PlaybackClock
             segment.Add(s);
             while (segment.Count > 2 && s.WallMs - segment[0].WallMs > options.WindowMs) segment.RemoveAt(0);
             Refit();
+
+            if (resumeFrom is { } held)
+            {
+                // Playback just started: rather than jumping ahead to where the song already is, start moving from
+                // the held position and catch up quickly (GetTime eases displayPhase towards targetPhase).
+                if (!double.IsNaN(lastFrameWall))
+                {
+                    displayPhase = Math.Min(targetPhase, held - rate * (lastFrameWall + OffsetMs - segmentStartWall));
+                    catchingUp = displayPhase < targetPhase;
+                }
+            }
         }
     }
+
+    /// <summary>The display is catching up after playback started (eases faster than usual).</summary>
+    private bool catchingUp;
 
     private double SeekThreshold => options.SeekBaseMs + options.SeekPerRateMs * rate;
 
@@ -188,6 +210,7 @@ public sealed class PlaybackClock
         segment.Add(s);
         segmentStartWall = s.WallMs;
         targetPhase = displayPhase = s.SongTimeMs;
+        catchingUp = false; // a new segment (e.g. a seek) is shown exactly
     }
 
     private void Refit()
@@ -278,10 +301,13 @@ public sealed class PlaybackClock
             lastFrameWall = wallMs;
 
             double diff = targetPhase - displayPhase;
+            if (catchingUp && Math.Abs(diff) < 0.5) catchingUp = false;
             if (diff != 0 && dt > 0)
             {
-                double step = diff * (1 - Math.Exp(-dt / options.SmoothingTauMs));
-                double maxStep = options.MaxSlewFraction * rate * dt;
+                double tau = catchingUp ? options.CatchUpTauMs : options.SmoothingTauMs;
+                double slew = catchingUp ? options.CatchUpSlewFraction : options.MaxSlewFraction;
+                double step = diff * (1 - Math.Exp(-dt / tau));
+                double maxStep = slew * rate * dt;
                 displayPhase += Math.Clamp(step, -maxStep, maxStep);
             }
 

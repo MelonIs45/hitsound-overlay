@@ -115,9 +115,11 @@ public class PlaybackClockTests(ITestOutputHelper output)
         }
         Assert.Equal(2, clock.SeekCount);
 
-        // Resume: back within one sample's jitter immediately, then precise.
+        // Resume: playback starts from the held position (so briefly behind by up to a sample interval plus delay,
+        // never ahead beyond jitter), catches up within a second, then is precise.
         var resumed = frames.Where(f => f.Wall > 10_000 + settle && f.Wall < 10_500).ToList();
-        Assert.All(resumed, f => Assert.InRange(f.Error, -60, 60));
+        Assert.All(resumed, f => Assert.InRange(f.Error, -2 * tosu.PollMs - tosu.MaxDelayMs, 60));
+        Assert.All(frames.Where(f => f.Wall > 11_000 && f.Wall < 12_000), f => Assert.InRange(f.Error, -60, 60));
         Assert.True(Stats(frames.Where(f => f.Wall > 15_000), "after resume").max < 2);
     }
 
@@ -181,14 +183,31 @@ public class PlaybackClockTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void Playback_starts_one_sample_after_moving_from_a_standstill_then_tracks()
+    public void Playback_starts_smoothly_from_the_held_position_then_tracks()
     {
         var clock = new PlaybackClock();
-        for (int i = 0; i < 5; i++) clock.AddSample(new TimeSample(10_000, i * 100, true));
-        // Play pressed just before wall 500: the song advances at 1x from then on.
-        for (int i = 5; i < 30; i++) clock.AddSample(new TimeSample(10_000 + (i * 100 - 495), i * 100, false));
-        double at = 2950;
-        Assert.InRange(clock.GetTime(at), 10_000 + (at - 495) - 5, 10_000 + (at - 495) + 5);
+        var frames = new List<(double Wall, double Shown)>();
+        int next = 0;
+        // Paused at 10 000 ms; play pressed at wall 495, after which the song advances at 1x.
+        var samples = Enumerable.Range(0, 40).Select(i => i < 5
+            ? new TimeSample(10_000, i * 100, true)
+            : new TimeSample(10_000 + (i * 100 - 495), i * 100, false)).ToList();
+        for (double f = 0; f < 3900; f += FrameMs)
+        {
+            while (next < samples.Count && samples[next].WallMs <= f) clock.AddSample(samples[next++]);
+            frames.Add((f, clock.GetTime(f)));
+        }
+
+        // No jump: from frame to frame the display never goes backwards and never moves faster than double speed
+        // (the catch-up limit), so starting playback is a smooth acceleration rather than a snap.
+        foreach (var (a, b) in frames.Zip(frames.Skip(1)))
+        {
+            double speed = (b.Shown - a.Shown) / (b.Wall - a.Wall);
+            Assert.InRange(speed, 0, 2.0 + 1e-6);
+        }
+        // Caught up within half a second of playback being confirmed, then tracks the song.
+        foreach (var (f, shown) in frames.Where(x => x.Wall > 1200))
+            Assert.InRange(shown, 10_000 + (f - 495) - 5, 10_000 + (f - 495) + 5);
         Assert.Equal(1.0, clock.Debug.Rate);
         Assert.Equal(0, clock.SeekCount);
     }
