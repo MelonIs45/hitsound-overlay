@@ -37,8 +37,12 @@ editor's song position, so you can map an osu!mania difficulty against the std m
    7–10, 11–14, 15–16 and 17–18 each get their own colour). The playfield position was measured on an 18-key map at
    2560×1441; other key counts assume the same column width, centred (unverified).
 5. Turn on **Layout mode** to drag and resize the strip; its position is kept relative to the osu! window.
-6. **Calibrate the offset once**: play at 100 % and nudge the offset until objects meet the "now" line together with
-   the matching mania notes. The offset is in ms of real time, so it stays right at the slower speeds too.
+6. **Calibrate the offset once**: play at 100 % and nudge the offset until the objects stay put when you pause (or
+   line up with osu!'s ticks while playing). The offset is in ms of real time, so it stays right at the slower speeds too.
+7. **Space and the mouse wheel** (both on by default, each with a checkbox): while osu!'s editor has focus the overlay
+   notices Space (play/pause) and plain wheel scrolls (seeks), so it starts, stops and follows seeks at once instead of
+   waiting for tosu's next report. Space is read by polling just that key; the wheel through Windows raw input; neither
+   is a hook, nothing is blocked, and nothing is read while osu! isn't focused.
 
 The status banner at the top of the settings window says what the overlay is waiting for (tosu, osu!, the editor, a map).
 Expand **Details** for the live clock readout.
@@ -68,6 +72,11 @@ it to the editor speeds, takes the phase from the least-delayed samples, and tre
 a seek. Measured on recorded tosu data, the predicted position wanders by under 1 ms at 100 % speed. Seeks show up
 within about 0.1 s. Details: [spikes/m0/FINDINGS.md](spikes/m0/FINDINGS.md).
 
+Some editor actions look alike in tosu's data, so the clock uses what tosu does report: a forward jump from a
+standstill is held until the next sample shows playback, and forward moves within 0.45 s of a "paused" report are
+seeks (tosu reports paused on the standstills between scroll steps, never during playback). With Space, playback
+starts at once and stops 36 ms after the key, when osu! actually stops.
+
 The strip is drawn with Direct2D through DirectComposition (GPU-composited transparency), on the GPU that drives
 osu!'s monitor, at the display's refresh rate.
 
@@ -79,7 +88,8 @@ dotnet test
 ```
 
 Run `src/Overlay.App/bin/Release/net8.0-windows/OsuTimelineOverlay.exe`. Options: a `.osu` path to show, `--demo` for
-a simulated editor (no osu! needed), `--log <file>` to append frame and clock stats every second.
+a simulated editor (no osu! needed), `--log <file>` to append frame and clock stats every second, `--trace <file>` to
+record every frame and tosu sample around each Space press and wheel-scroll burst.
 
 | Project | Contents |
 |---|---|
