@@ -182,6 +182,34 @@ public class PlaybackClockTests(ITestOutputHelper output)
         foreach (var (f, s, expected) in shown) Assert.True(Math.Abs(s - expected) < 0.001, $"at {f} ms showed {s}, expected {expected}");
     }
 
+    /// <summary>
+    /// Scrolling forward repeatedly while paused, as recorded from tosu: steps of one snap (83 ms) every sample, so it
+    /// advances at a believable 0.83x; the moving samples say "not paused", the standstill between bursts "paused".
+    /// It must snap to each position and never be mistaken for playback.
+    /// </summary>
+    [Fact]
+    public void Repeated_forward_scrolling_is_not_mistaken_for_playback()
+    {
+        var clock = new PlaybackClock();
+        double wall = 0, song = 8_000;
+        var shown = new List<(double Wall, double Shown, double Expected)>();
+        void Sample(bool paused)
+        {
+            clock.AddSample(new TimeSample(song, wall, paused));
+            for (double f = wall; f < wall + 100; f += FrameMs) shown.Add((f, clock.GetTime(f), song));
+            wall += 100;
+        }
+
+        for (int i = 0; i < 5; i++) Sample(paused: true);
+        for (int burst = 0; burst < 8; burst++)
+        {
+            for (int step = 0; step < 3; step++) { song += 83; Sample(paused: false); }
+            Sample(paused: true); // the standstill between scroll bursts
+        }
+
+        foreach (var (f, s, expected) in shown) Assert.True(Math.Abs(s - expected) < 0.001, $"at {f} ms showed {s}, expected {expected}");
+    }
+
     [Fact]
     public void Playback_starts_smoothly_from_the_held_position_then_tracks()
     {
@@ -198,12 +226,14 @@ public class PlaybackClockTests(ITestOutputHelper output)
             frames.Add((f, clock.GetTime(f)));
         }
 
-        // No jump: from frame to frame the display never goes backwards and never moves faster than double speed
-        // (the catch-up limit), so starting playback is a smooth acceleration rather than a snap.
+        // Never backwards. Without the play key, playback is only recognised once the source hasn't said "paused" for a
+        // while (last said at wall 400, so from 850): until then the display steps with the samples like a seek, and
+        // from then on it moves smoothly, at most double speed while catching up.
         foreach (var (a, b) in frames.Zip(frames.Skip(1)))
         {
             double speed = (b.Shown - a.Shown) / (b.Wall - a.Wall);
-            Assert.InRange(speed, 0, 2.0 + 1e-6);
+            Assert.True(speed >= 0, $"moved backwards at {b.Wall} ms");
+            if (a.Wall > 1000) Assert.InRange(speed, 0, 2.0 + 1e-6);
         }
         // Caught up within half a second of playback being confirmed, then tracks the song.
         foreach (var (f, shown) in frames.Where(x => x.Wall > 1200))

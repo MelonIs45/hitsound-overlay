@@ -28,6 +28,11 @@ public sealed class PlaybackClockOptions
     /// </summary>
     public double CatchUpTauMs { get; set; } = 100;
     public double CatchUpSlewFraction { get; set; } = 1.0;
+    /// <summary>
+    /// Forward moves within this long of a "paused" report are seeks (scrolling), not playback. Measured: while
+    /// scrolling, tosu reports paused every 3–4 samples; during playback never.
+    /// </summary>
+    public double PausedFlagQuietMs { get; set; } = 450;
     /// <summary>After the play/pause key, how long samples that don't show the change yet are ignored.</summary>
     public double KeyHintGraceMs { get; set; } = 300;
     /// <summary>With no samples for this long, stop extrapolating and hold the last position.</summary>
@@ -97,6 +102,7 @@ public sealed class PlaybackClock
             double? resumeFrom = null; // set when this sample confirms that playback started
             hasSample = true;
             last = s;
+            if (s.Paused == true) lastPausedFlagWall = s.WallMs;
 
             // After the play/pause key, samples read before osu! reacted are stale for a moment.
             if (keyHint != KeyHint.None && s.WallMs - keyHintWall > options.KeyHintGraceMs) keyHint = KeyHint.None;
@@ -148,7 +154,10 @@ public sealed class PlaybackClock
                 // the sample after a seek as unpaused, so the flag can't tell them apart). Show the new position exactly
                 // and hold it; playback resumes only once the next sample has advanced at a playback speed, starting
                 // from this sample so no time is lost. Otherwise a forward seek would drift ahead and snap back.
-                if (pendingResume is { } start && IsPlaybackSpeed(start, s))
+                // While scrolling, the source still reports "paused" on the standstill samples between scroll steps
+                // (every few samples), but never during playback: so recently-paused means these moves are seeks.
+                bool recentlyPaused = s.WallMs - lastPausedFlagWall < options.PausedFlagQuietMs;
+                if (pendingResume is { } start && IsPlaybackSpeed(start, s) && !recentlyPaused)
                 {
                     resumeFrom = frozenSong;
                     frozen = false;
@@ -264,6 +273,8 @@ public sealed class PlaybackClock
 
     /// <summary>A forward move from a standstill, waiting for the next sample to show whether playback started.</summary>
     private TimeSample? pendingResume;
+    /// <summary>When the source last reported "paused".</summary>
+    private double lastPausedFlagWall = double.NegativeInfinity;
 
     /// <summary>Whether the song advanced between two samples at a rate the editor can play at.</summary>
     private static bool IsPlaybackSpeed(TimeSample a, TimeSample b)
