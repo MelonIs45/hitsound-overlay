@@ -221,6 +221,18 @@ public sealed class PlaybackClock
                 }
             }
 
+            if (segment.Count == 0)
+            {
+                // Running since the play key, but no sample confirmed it within the grace period (e.g. osu! jumped back
+                // as playback started): carry on from this sample, snapping if it's a jump.
+                double shown = ShownAt(lastFrameWall);
+                bool jumped = !(Math.Abs(s.SongTimeMs - shown) <= SeekThreshold);
+                if (jumped) { SeekCount++; LastSeekWallMs = s.WallMs; }
+                StartSegment(s);
+                if (!jumped) ContinueFrom(shown);
+                return;
+            }
+
             double predicted = targetPhase + rate * (s.WallMs - segmentStartWall);
             double impliedSpeed = (s.SongTimeMs - segment[^1].SongTimeMs) / Math.Max(1, s.WallMs - segment[^1].WallMs);
             double error = s.SongTimeMs - predicted;
@@ -327,9 +339,16 @@ public sealed class PlaybackClock
     private double ShownAt(double wallMs)
     {
         if (frozen) return frozenSong;
-        double t = Math.Min(wallMs + OffsetMs, last.WallMs + options.StaleAfterMs);
-        return displayPhase + rate * (t - segmentStartWall);
+        return displayPhase + rate * (ExtrapolateTo(wallMs) - segmentStartWall);
     }
+
+    /// <summary>
+    /// The wall time to extrapolate to: <paramref name="wallMs"/> plus the offset, but no further than a while after the
+    /// latest information (a sample, or the play key starting this segment), so the display stops if the source goes
+    /// quiet. Never before the segment start, which would run the display backwards.
+    /// </summary>
+    private double ExtrapolateTo(double wallMs) =>
+        Math.Min(wallMs + OffsetMs, Math.Max(last.WallMs, segmentStartWall) + options.StaleAfterMs);
 
     /// <summary>Keeps the display continuous at <paramref name="shown"/> and eases it onto the new estimate quickly.</summary>
     private void ContinueFrom(double shown)
@@ -473,8 +492,7 @@ public sealed class PlaybackClock
             }
 
             // Stop extrapolating if the source went quiet.
-            double t = Math.Min(wallMs + OffsetMs, last.WallMs + options.StaleAfterMs);
-            return displayPhase + rate * (t - segmentStartWall);
+            return displayPhase + rate * (ExtrapolateTo(wallMs) - segmentStartWall);
         }
     }
 }

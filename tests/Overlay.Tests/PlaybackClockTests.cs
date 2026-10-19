@@ -317,6 +317,34 @@ public class PlaybackClockTests(ITestOutputHelper output)
     }
 
     /// <summary>
+    /// From a real trace: Space pressed to play, but osu!'s position then jumped back (a scroll as playback started), so
+    /// no sample ever moved past the key press. Once the grace period ended the clock used to throw, which also ended
+    /// tosu's receive loop for good.
+    /// </summary>
+    [Fact]
+    public void Play_key_followed_by_a_backward_jump_is_followed()
+    {
+        var samples = new List<TimeSample>();
+        for (double w = 0; w < 1000; w += 100) samples.Add(new TimeSample(32_813, w + 10, true));
+        samples.Add(new TimeSample(32_515, 1010, false));
+        for (double w = 1100; w < 4000; w += 100) samples.Add(new TimeSample(31_627 + (w - 1100), w + 10, false));
+        var frames = RunWithKeys(new PlaybackClock(), samples, new[] { 1000.0 }, 4000);
+        // Playing from the new position by the end.
+        foreach (var (wall, shown) in frames.Where(f => f.Wall > 3000))
+            Assert.InRange(shown, 31_627 + (wall - 1110) - 15, 31_627 + (wall - 1110) + 15);
+    }
+
+    /// <summary>The time source goes quiet just after Space: the display may stop, but never runs backwards.</summary>
+    [Fact]
+    public void Display_never_runs_backwards_when_samples_stop_after_play_key()
+    {
+        var samples = Enumerable.Range(0, 10).Select(i => new TimeSample(10_000, i * 100 + 20, true)).ToList();
+        var frames = RunWithKeys(new PlaybackClock(), samples, new[] { 2500.0, 4000, 4500, 6000 }, 8000);
+        foreach (var (a, b) in frames.Zip(frames.Skip(1)))
+            Assert.True(b.Shown >= a.Shown - 0.001, $"went back from {a.Shown} to {b.Shown} at {b.Wall} ms");
+    }
+
+    /// <summary>
     /// Small scroll-wheel seeks while playing (one 1/8 snap, 41 ms, each way), too small to tell from tosu's delivery
     /// jitter by the samples alone. With the wheel event they're picked up at once and never linger in the estimate.
     /// </summary>

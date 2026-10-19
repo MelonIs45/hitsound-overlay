@@ -162,6 +162,7 @@ public sealed class AppController : IDisposable
             var tosu = new TosuTimeSource(wall);
             Attach(tosu);
             tosu.SkinChanged += folder => ui.BeginInvoke(() => LoadSkin(folder));
+            tosu.Error += LogSourceError;
             tosu.Start();
             source = tosu;
         }
@@ -188,6 +189,25 @@ public sealed class AppController : IDisposable
             if (entering) ResetClock(); // fresh clock state each time the editor opens
         };
         s.BeatmapChanged += info => ui.BeginInvoke(() => OnBeatmapChanged(info));
+    }
+
+    private string? lastSourceError;
+
+    /// <summary>
+    /// Appends an error the time source recovered from to crash.log (each distinct error once in a row, as a failing
+    /// handler would otherwise repeat it ten times a second).
+    /// </summary>
+    private void LogSourceError(Exception e)
+    {
+        string text = e.ToString();
+        if (Interlocked.Exchange(ref lastSourceError, text) == text) return;
+        try
+        {
+            string log = Path.Combine(Path.GetDirectoryName(SettingsStore.DefaultPath)!, "crash.log");
+            Directory.CreateDirectory(Path.GetDirectoryName(log)!);
+            File.AppendAllText(log, $"{DateTime.Now:u} (recovered, tosu message){Environment.NewLine}{text}{Environment.NewLine}{Environment.NewLine}");
+        }
+        catch (IOException) { }
     }
 
     private void ResetClock()

@@ -31,6 +31,8 @@ public sealed class TosuTimeSource : ITimeSource, IDisposable
     /// ("Use default skin in the editor"). Raised on a background thread when it changes.
     /// </summary>
     public event Action<string?>? SkinChanged;
+    /// <summary>An unexpected error while handling a message; the connection carries on. Raised on a background thread.</summary>
+    public event Action<Exception>? Error;
 
     /// <param name="wall">The stopwatch the renderer uses for frame times, so sample and frame times line up.</param>
     public TosuTimeSource(Stopwatch wall, string url = DefaultUrl)
@@ -61,10 +63,12 @@ public sealed class TosuTimeSource : ITimeSource, IDisposable
                     message.Write(buffer, 0, result.Count);
                     if (!result.EndOfMessage) continue;
                     double receivedAt = wall.Elapsed.TotalMilliseconds;
+                    // One bad message (or a failing handler) must not end the connection: later messages still count.
                     try { Handle(message.GetBuffer().AsSpan(0, (int)message.Length), receivedAt); }
-                    catch (Exception e) when (e is JsonException or KeyNotFoundException or InvalidOperationException)
+                    catch (Exception e) when (e is not OperationCanceledException)
                     {
-                        Trace.WriteLine($"tosu: unexpected message: {e.Message}");
+                        Trace.WriteLine($"tosu: error handling a message: {e}");
+                        Error?.Invoke(e);
                     }
                     message.SetLength(0);
                 }
@@ -72,6 +76,12 @@ public sealed class TosuTimeSource : ITimeSource, IDisposable
             catch (OperationCanceledException) { break; }
             catch (WebSocketException) { }
             catch (IOException) { }
+            catch (Exception e)
+            {
+                // Anything else: reconnect rather than stop for good.
+                Trace.WriteLine($"tosu: connection error: {e}");
+                Error?.Invoke(e);
+            }
 
             message.SetLength(0);
             SetStatus(SourceStatus.Disconnected);
