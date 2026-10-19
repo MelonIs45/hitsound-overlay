@@ -316,6 +316,62 @@ public class PlaybackClockTests(ITestOutputHelper output)
         Assert.All(frames.Where(f => f.Wall > 1500), f => Assert.Equal(10_000, f.Shown, 3));
     }
 
+    /// <summary>
+    /// Small scroll-wheel seeks while playing (one 1/8 snap, 41 ms, each way), too small to tell from tosu's delivery
+    /// jitter by the samples alone. With the wheel event they're picked up at once and never linger in the estimate.
+    /// </summary>
+    [Theory]
+    [InlineData(-41)]
+    [InlineData(41)]
+    public void Small_scroll_seeks_while_playing_are_followed(double step)
+    {
+        var seeks = new[] { 8_000.0, 14_000, 20_000 };
+        var events = new List<Event>();
+        double offset = 0;
+        foreach (var w in seeks) { offset += step; events.Add(new Seek(w, 10_000 + w + offset)); }
+        var editor = new EditorSimulation(10_000, 1.0, false, events);
+        var tosu = new SimulatedTosu();
+        var clock = CalibratedClock(tosu);
+        var samples = tosu.Generate(editor, 0, 26_000, seed: 3);
+        var frames = new List<Frame>();
+        int next = 0, nextWheel = 0;
+        for (double f = 0; f < 26_000; f += FrameMs)
+        {
+            while (nextWheel < seeks.Length && seeks[nextWheel] <= f) clock.ScrollWheelMoved(seeks[nextWheel++]);
+            while (next < samples.Count && samples[next].WallMs <= f) clock.AddSample(samples[next++]);
+            frames.Add(new Frame(f, clock.GetTime(f), editor.SongAt(f)));
+        }
+
+        foreach (var w in seeks)
+        {
+            // The seek is followed: no lingering 41 ms error. (A fresh estimate after any seek can trail by a delivery
+            // delay burst for a moment; the simulated source has those, like real tosu.)
+            // Never as far off as the seek itself (41 ms), i.e. it was taken up rather than averaged away.
+            var after = frames.Where(f => f.Wall > w + 600 && f.Wall < w + 5_000).ToList();
+            Stats(after, $"step {step}: after seek at {w}");
+            Assert.All(after, f => Assert.InRange(f.Error, -30, 30));
+        }
+        Assert.All(frames.Where(f => f.Wall > 23_000), f => Assert.InRange(f.Error, -4, 4));
+    }
+
+    [Fact]
+    public void Scroll_wheel_while_paused_snaps_even_without_pause_flags()
+    {
+        var clock = new PlaybackClock();
+        double wall = 0, song = 8_000;
+        var shown = new List<(double Wall, double Shown, double Expected)>();
+        for (int i = 0; i < 5; i++) { clock.AddSample(new TimeSample(song, wall, null)); wall += 100; }
+        for (int step = 0; step < 12; step++)
+        {
+            clock.ScrollWheelMoved(wall - 30);
+            song += 83;
+            clock.AddSample(new TimeSample(song, wall, null)); // no pause flag at all
+            for (double f = wall; f < wall + 100; f += FrameMs) shown.Add((f, clock.GetTime(f), song));
+            wall += 100;
+        }
+        foreach (var (f, s, expected) in shown) Assert.True(Math.Abs(s - expected) < 0.001, $"at {f} ms showed {s}, expected {expected}");
+    }
+
     [Fact]
     public void Holds_position_when_the_source_goes_quiet()
     {

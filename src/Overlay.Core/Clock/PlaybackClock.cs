@@ -38,6 +38,13 @@ public sealed class PlaybackClockOptions
     /// the display keeps moving for this long so it stops where osu! does.
     /// </summary>
     public double PauseKeyLatencyMs { get; set; } = 36;
+    /// <summary>After a scroll-wheel event, how long samples may still carry the resulting seek (a sample or three).</summary>
+    public double ScrollSeekWindowMs { get; set; } = 350;
+    /// <summary>
+    /// Within that window, a sample this far from the prediction (× playback speed, plus 15 ms) is shown as a jump;
+    /// smaller differences are eased in. Kept above typical delivery jitter (~10–25 ms at 100 %).
+    /// </summary>
+    public double ScrollSeekToleranceMs { get; set; } = 20;
     /// <summary>After the play/pause key, how long samples that don't show the change yet are ignored.</summary>
     public double KeyHintGraceMs { get; set; } = 300;
     /// <summary>With no samples for this long, stop extrapolating and hold the last position.</summary>
@@ -132,6 +139,30 @@ public sealed class PlaybackClock
                 keyHint = KeyHint.None; // the paused position: shown exactly below
             }
 
+            // Just after a scroll-wheel seek, any move away from the prediction is that seek, however small.
+            if (s.WallMs <= scrollSeekUntil && s.Paused != true && !stalled)
+            {
+                if (frozen)
+                {
+                    // Scrolling while paused: snap, and don't take the moves for playback starting.
+                    if (Math.Abs(s.SongTimeMs - frozenSong) > options.SeekBaseMs) { SeekCount++; LastSeekWallMs = s.WallMs; }
+                    frozenSong = s.SongTimeMs;
+                    pendingResume = null;
+                    return;
+                }
+                // Scrolling while playing: start again from this sample, so even a seek too small to tell from
+                // delivery jitter can't linger in the estimate. A clear jump snaps (that's the seek); a small
+                // difference eases in, so jitter never shows as a jump.
+                double expected = targetPhase + rate * (s.WallMs - segmentStartWall);
+                bool jumped = Math.Abs(s.SongTimeMs - expected) > options.ScrollSeekToleranceMs * Math.Max(rate, 0.25) + 15;
+                double shown = ShownAt(lastFrameWall);
+                if (jumped) { SeekCount++; LastSeekWallMs = s.WallMs; }
+                StartSegment(s);
+                if (!jumped) ContinueFrom(shown);
+                fastEaseUntilWall = s.WallMs + 1500; // the fresh estimate is refined quickly over the next samples
+                return;
+            }
+
             if (s.Paused == true || stalled)
             {
                 // While paused every position change is shown exactly. Count real seeks for the debug readout,
@@ -193,10 +224,12 @@ public sealed class PlaybackClock
             double predicted = targetPhase + rate * (s.WallMs - segmentStartWall);
             double impliedSpeed = (s.SongTimeMs - segment[^1].SongTimeMs) / Math.Max(1, s.WallMs - segment[^1].WallMs);
             double error = s.SongTimeMs - predicted;
-            if (error < -SeekThreshold && impliedSpeed >= 0 && impliedSpeed < 0.5 * rate)
+            if (s.Paused == null && error < -SeekThreshold && impliedSpeed >= 0 && impliedSpeed < 0.5 * rate)
             {
                 // Fell well behind while barely moving: playback stopped between samples (a pause the source
                 // didn't flag). Hold here; if it was a slow-down instead, the next sample restarts playback.
+                // Only for sources without a pause flag: with one, this pattern is a small backward scroll while
+                // playing, and the pause itself is reported.
                 frozen = true;
                 frozenSong = s.SongTimeMs;
                 segment.Clear();
@@ -266,6 +299,25 @@ public sealed class PlaybackClock
 
     /// <summary>After the pause key: when to stop (osu! stops a little after the key).</summary>
     private double? pauseAtWall;
+
+    /// <summary>Samples up to this wall time may carry a scroll-wheel seek.</summary>
+    private double scrollSeekUntil = double.NegativeInfinity;
+    /// <summary>Until this wall time, refinements of the estimate are eased in quickly (after a scroll seek).</summary>
+    private double fastEaseUntilWall = double.NegativeInfinity;
+
+    /// <summary>
+    /// The editor's timeline was scrolled (mouse wheel) at <paramref name="wallMs"/>, which seeks. For a short while,
+    /// samples that differ from the prediction are taken as that seek even when the jump is too small to tell from
+    /// delivery jitter: while playing, playback carries on from the new position; while paused, it snaps there.
+    /// </summary>
+    public void ScrollWheelMoved(double wallMs)
+    {
+        lock (gate)
+        {
+            Trace?.Invoke($"wheel wall {wallMs:F1}");
+            scrollSeekUntil = Math.Max(scrollSeekUntil, wallMs + options.ScrollSeekWindowMs);
+        }
+    }
 
     private enum KeyHint { None, Play, Pause }
     private KeyHint keyHint;
@@ -412,8 +464,9 @@ public sealed class PlaybackClock
             if (catchingUp && Math.Abs(diff) < 0.5) catchingUp = false;
             if (diff != 0 && dt > 0)
             {
-                double tau = catchingUp ? options.CatchUpTauMs : options.SmoothingTauMs;
-                double slew = catchingUp ? options.CatchUpSlewFraction : options.MaxSlewFraction;
+                bool fast = catchingUp || wallMs < fastEaseUntilWall;
+                double tau = fast ? options.CatchUpTauMs : options.SmoothingTauMs;
+                double slew = fast ? options.CatchUpSlewFraction : options.MaxSlewFraction;
                 double step = diff * (1 - Math.Exp(-dt / tau));
                 double maxStep = slew * rate * dt;
                 displayPhase += Math.Clamp(step, -maxStep, maxStep);

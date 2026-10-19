@@ -48,6 +48,8 @@ public sealed class AppController : IDisposable
     public HotkeyManager Hotkeys { get; }
     /// <summary>Space (play/pause) presses in osu!'s editor, so playback starts and stops on the overlay at once.</summary>
     public SpaceKeyWatcher SpaceKey { get; }
+    /// <summary>Mouse-wheel scrolls in osu!'s editor (they seek), so even small seeks are followed exactly.</summary>
+    public WheelWatcher Wheel { get; }
     public TimelineRenderer Renderer { get; }
     public OverlayHost Overlay { get; }
     /// <summary>Second click-through window over the mania playfield, for the bar tint.</summary>
@@ -79,6 +81,8 @@ public sealed class AppController : IDisposable
 
         SpaceKey = new SpaceKeyWatcher(wall);
         SpaceKey.Pressed += wallMs => clock.PlayPauseKeyPressed(wallMs);
+        Wheel = new WheelWatcher(Control, wall);
+        Wheel.Scrolled += wallMs => clock.ScrollWheelMoved(wallMs);
 
         Hotkeys = new HotkeyManager(Control);
         Hotkeys.Pressed += OnHotkey;
@@ -443,6 +447,7 @@ public sealed class AppController : IDisposable
         osu.Update();
         if (followTicks++ % 10 == 0) UpdateStatusSurfaces();
         SpaceKey.Active = Settings.UseSpaceKey && Settings.Source == TimeSourceKind.Tosu && status.InEditor && osu.OsuInForeground;
+        Wheel.Active = Settings.UseScrollWheel && Settings.Source == TimeSourceKind.Tosu && status.InEditor && osu.OsuInForeground;
         double now = wall.Elapsed.TotalMilliseconds;
 
         bool want = Overlay.LayoutMode
@@ -613,7 +618,16 @@ public sealed class AppController : IDisposable
     {
         tracePath = path;
         Renderer.FrameTrace = (wallMs, shown) => AddTrace(wallMs, $"frame wall {wallMs:F1} shown {shown:F1}");
-        SpaceKey.Pressed += wallMs => Task.Delay(1500).ContinueWith(_ => DumpTrace(wallMs));
+        SpaceKey.Pressed += wallMs => Task.Delay(1500).ContinueWith(_ => DumpTrace(wallMs, wallMs, "Space"));
+        // Wheel scrolling comes in bursts: write one stretch from just before the first scroll to 1.5 s after the last.
+        double burstStart = double.NaN, lastWheel = double.NaN;
+        Wheel.Scrolled += wallMs =>
+        {
+            if (double.IsNaN(lastWheel) || wallMs - lastWheel > 1000) burstStart = wallMs;
+            lastWheel = wallMs;
+            double start = burstStart, last = wallMs;
+            Task.Delay(1500).ContinueWith(_ => { if (last == lastWheel) DumpTrace(start, last, "wheel scrolling"); });
+        };
         AttachTraceToClock();
     }
 
@@ -627,16 +641,16 @@ public sealed class AppController : IDisposable
         lock (traceLock)
         {
             traceRing.Enqueue((wallMs, line));
-            while (traceRing.Count > 0 && wallMs - traceRing.Peek().Wall > 5000) traceRing.Dequeue();
+            while (traceRing.Count > 0 && wallMs - traceRing.Peek().Wall > 20000) traceRing.Dequeue(); // long enough for a scroll burst
         }
     }
 
-    private void DumpTrace(double keyWall)
+    private void DumpTrace(double fromWall, double toWall, string what)
     {
         List<string> lines;
         lock (traceLock)
-            lines = traceRing.Where(e => e.Wall >= keyWall - 500 && e.Wall <= keyWall + 1500).Select(e => e.Line).ToList();
-        File.AppendAllText(tracePath!, $"=== Space at {keyWall:F1} (offset {Settings.OffsetMs} ms){Environment.NewLine}" +
+            lines = traceRing.Where(e => e.Wall >= fromWall - 500 && e.Wall <= toWall + 1500).Select(e => e.Line).ToList();
+        File.AppendAllText(tracePath!, $"=== {what} at {fromWall:F1} (offset {Settings.OffsetMs} ms){Environment.NewLine}" +
             string.Join(Environment.NewLine, lines) + Environment.NewLine);
     }
 
@@ -664,6 +678,7 @@ public sealed class AppController : IDisposable
         SaveNow();
         Hotkeys.Dispose();
         SpaceKey.Dispose();
+        Wheel.Dispose();
         Tray.Dispose();
         statsLog?.Dispose();
         followTimer.Stop();

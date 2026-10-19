@@ -43,6 +43,8 @@ public sealed class OverlaySettings
     public bool ShowDebug { get; set; }
     /// <summary>Start/stop the moment Space (the editor's play/pause key) is pressed, instead of when tosu next reports.</summary>
     public bool UseSpaceKey { get; set; } = true;
+    /// <summary>Follow mouse-wheel seeks in the editor exactly (raw input while osu!'s editor has focus).</summary>
+    public bool UseScrollWheel { get; set; } = true;
     /// <summary>Tint the mania playfield's columns with the std map's combo colours.</summary>
     public bool ManiaColumnTint { get; set; } = true;
     /// <summary>The tint moves on to the next combo colour at each of these column numbers (1 = leftmost).</summary>

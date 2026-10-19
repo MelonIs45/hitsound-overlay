@@ -265,7 +265,19 @@ public sealed class TimelineRenderer : IOverlayRenderer
                 return true;
             }
             case HitObjectKind.Spinner:
-                return false; // osu! draws spinners on the timeline as plain bars; keep the drawn version
+            {
+                // Like a slider, in a neutral grey (spinners have no combo colour): a body as tall as the hit circle,
+                // with an unnumbered hit circle at the start and at the tail.
+                var grey = new Rgb(150, 150, 160);
+                var body = Capsule(x0, x1, y, (float)(61.25 * scale));
+                dc.FillRoundedRectangle(body, Brush(grey.R, grey.G, grey.B, 148));
+                foreach (var x in new[] { x1, x0 }) // tail first, so the start is drawn on top
+                {
+                    skin.Draw(dc, "hitcircle", x, y, scale, ObjectOpacity, grey);
+                    skin.Draw(dc, "hitcircleoverlay", x, y, scale, ObjectOpacity);
+                }
+                return true;
+            }
             default:
                 DrawSkinnedCircle(dc, skin, x0, y, scale, c, o.ComboNumber);
                 return true;
