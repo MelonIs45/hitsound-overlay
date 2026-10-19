@@ -185,8 +185,10 @@ public sealed class TimelineRenderer : IOverlayRenderer
             float x0 = (float)layout.TimeToX(o.StartTime, now), x1 = (float)layout.TimeToX(o.EndTime, now);
             var c = colours[o.ComboColourIndex % colours.Count];
 
-            // On osu!'s timeline, objects fade out towards both ends as they do in the editor.
-            float alpha = fadeAtEnds ? (float)EditorTimeline.EdgeAlpha(Math.Min(x0, w - x0) / h) : 1;
+            // On osu!'s timeline, objects fade out towards both ends as they do in the editor: by the tail at the left
+            // end (where objects leave, so a long slider or spinner stays solid while any of it is well inside) and by
+            // the head at the right end (where they come in).
+            float alpha = fadeAtEnds ? (float)EditorTimeline.EdgeAlpha(Math.Min(x1, w - x0) / h) : 1;
             if (alpha <= 0.001f) continue;
             objectAlpha = alpha; // multiplied into every brush and image this object uses
 
