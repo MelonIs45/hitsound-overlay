@@ -57,8 +57,13 @@ public sealed class TimelineRenderer : IOverlayRenderer
     /// objects. Null: the std map's timing.
     /// </summary>
     public volatile TimingModel? EditorTiming;
-    /// <summary>Horizontal extents of the objects drawn this frame (for drawing osu!'s ticks over them).</summary>
-    private readonly List<(float From, float To)> drawnSpans = new();
+    /// <summary>
+    /// Centres of the circles drawn this frame (hit circles, slider heads, repeats and tails, spinner ends), for drawing
+    /// osu!'s ticks over them.
+    /// </summary>
+    private readonly List<float> drawnCircles = new();
+    /// <summary>Slider bodies drawn this frame (between head and tail centres), where ticks are drawn too.</summary>
+    private readonly List<(float From, float To)> drawnBodies = new();
     public volatile string? Message;
 
     public FrameStats Stats { get; } = new();
@@ -130,7 +135,7 @@ public sealed class TimelineRenderer : IOverlayRenderer
         if (!ReferenceEquals(skin, activeSkin)) { activeSkin?.Dispose(); activeSkin = skin; } // GPU objects die on this thread
         double skinScale = editor != null ? h * editor.SkinScaleFraction : r / 61.25;
         DrawObjects(dc, s!, layout, now, from, to, laneY, r, w, h, fadeAtEnds: editor != null, skin, skinScale);
-        if (editor != null) DrawEditorTicks(dc, editor, EditorTiming ?? s!.Beatmap.Timing, layout, now, from, to, h);
+        if (editor != null) DrawEditorTicks(dc, editor, EditorTiming ?? s!.Beatmap.Timing, layout, now, from, to, h, laneY, r);
         if (editor == null) dc.DrawLine(nowLine.Item1, nowLine.Item2, Brush(255, 204, 34), 2);
 
         var truth = TruthAt;
@@ -173,29 +178,39 @@ public sealed class TimelineRenderer : IOverlayRenderer
     }
 
     /// <summary>
-    /// osu!'s beat ticks, redrawn where they cross an object, so they show on top of the objects as in the std editor.
-    /// Elsewhere osu!'s own ticks already show through.
+    /// osu!'s beat ticks, redrawn where they cross a circle (a hit circle, a slider's head, repeat or tail, a spinner's
+    /// ends) or a slider body, so they show on top as in the std editor. Not over spinner bodies; elsewhere osu!'s own
+    /// ticks show through.
     /// </summary>
     private void DrawEditorTicks(ID2D1DeviceContext dc, EditorTimelineView view, TimingModel timing, TimelineLayout layout,
-        double now, double from, double to, float h)
+        double now, double from, double to, float h, float laneY, float r)
     {
-        if (drawnSpans.Count == 0) return;
-        drawnSpans.Sort((a, b) => a.From.CompareTo(b.From));
+        if (drawnCircles.Count == 0) return;
+        drawnCircles.Sort();
+        drawnBodies.Sort((a, b) => a.From.CompareTo(b.From));
         float px = 96f / dc.Dpi.Width; // one physical pixel, in drawing units
         float bottom = MathF.Round(h * (float)view.TickBottomFraction / px) * px;
         byte alpha = (byte)Math.Round(EditorTimeline.TickOpacity * 255);
-        int span = 0;
+        int first = 0;
         foreach (var tick in BeatGrid.Ticks(timing, from, to, BeatSnap))
         {
-            float x = (float)layout.TimeToX(tick.Time, now);
-            while (span < drawnSpans.Count && drawnSpans[span].To < x) span++;
-            bool covered = false;
-            for (int i = span; i < drawnSpans.Count && drawnSpans[i].From <= x; i++)
-                if (drawnSpans[i].To >= x) { covered = true; break; }
-            if (!covered) continue;
-
             double fraction = tick.IsBarLine ? view.BarTickFraction : tick.Denominator == 1 ? view.BeatTickFraction : view.SubTickFraction;
             float len = MathF.Round(h * (float)fraction / px) * px;
+            // The tick crosses a circle if its top end is inside it: within the circle's half-width at that height.
+            float dy = bottom - len - laneY;
+            if (dy >= r) continue; // shorter than the gap below the circles
+            float halfWidth = MathF.Sqrt(r * r - dy * dy);
+
+            float x = (float)layout.TimeToX(tick.Time, now);
+            while (first < drawnCircles.Count && drawnCircles[first] < x - r) first++;
+            bool covered = false;
+            for (int i = first; i < drawnCircles.Count && drawnCircles[i] <= x + halfWidth; i++)
+                if (MathF.Abs(drawnCircles[i] - x) <= halfWidth) { covered = true; break; }
+            // Slider bodies are as tall as the circles, so between head and tail they cover the tick.
+            for (int i = 0; !covered && i < drawnBodies.Count && drawnBodies[i].From <= x; i++)
+                if (drawnBodies[i].To >= x) covered = true;
+            if (!covered) continue;
+
             float column = MathF.Floor(x / px) * px;
             var (cr, cg, cb) = EditorTimeline.TickColour(tick.Denominator);
             dc.FillRectangle(new Rect(column, bottom - len, px, len), Brush(cr, cg, cb, alpha));
@@ -215,7 +230,8 @@ public sealed class TimelineRenderer : IOverlayRenderer
         var (first, end) = s.Index.Query(from, to);
 
         int drawn = 0;
-        drawnSpans.Clear();
+        drawnCircles.Clear();
+        drawnBodies.Clear();
         // Later objects first, so earlier ones (the next to be hit) end up on top, as in the editor.
         for (int i = end - 1; i >= first; i--)
         {
@@ -234,7 +250,13 @@ public sealed class TimelineRenderer : IOverlayRenderer
             if (skin == null || !DrawSkinned(dc, skin, o, x0, x1, laneY, skinScale, c))
                 DrawVector(dc, o, x0, x1, laneY, r, c);
 
-            drawnSpans.Add((x0 - r, x1 + r));
+            drawnCircles.Add(x0);
+            if (o.Kind is HitObjectKind.Slider or HitObjectKind.Spinner) drawnCircles.Add(x1);
+            if (o.Kind == HitObjectKind.Slider)
+            {
+                drawnBodies.Add((x0, x1));
+                for (int k = 1; k < o.Slides; k++) drawnCircles.Add(RepeatX(o, x0, x1, k));
+            }
             drawn++;
         }
         LastDrawn = (drawn, first, end, from, to);
@@ -299,8 +321,14 @@ public sealed class TimelineRenderer : IOverlayRenderer
                 // Tail: a hit circle without a number.
                 skin.Draw(dc, "hitcircle", x1, y, scale, ObjectOpacity, c);
                 skin.Draw(dc, "hitcircleoverlay", x1, y, scale, ObjectOpacity);
-                for (int k = 1; k < o.Slides; k++)
-                    skin.Draw(dc, "reversearrow", x0 + (x1 - x0) * k / o.Slides, y, scale, ObjectOpacity);
+                // Repeats: an unnumbered hit circle with the reverse arrow on it (later ones first, so earlier ones are on top).
+                for (int k = o.Slides - 1; k >= 1; k--)
+                {
+                    float xr = RepeatX(o, x0, x1, k);
+                    skin.Draw(dc, "hitcircle", xr, y, scale, ObjectOpacity, c);
+                    skin.Draw(dc, "hitcircleoverlay", xr, y, scale, ObjectOpacity);
+                    skin.Draw(dc, "reversearrow", xr, y, scale, ObjectOpacity);
+                }
                 DrawSkinnedCircle(dc, skin, x0, y, scale, c, o.ComboNumber);
                 return true;
             }
@@ -355,6 +383,9 @@ public sealed class TimelineRenderer : IOverlayRenderer
             left += dw - overlap;
         }
     }
+    /// <summary>Where a slider's <paramref name="k"/>th repeat (1-based) is, between its head and tail.</summary>
+    private static float RepeatX(HitObject o, float x0, float x1, int k) => x0 + (x1 - x0) * k / o.Slides;
+
     /// <summary>A bar of height 2r whose round ends are centred on x0 and x1.</summary>
     private static RoundedRectangle Capsule(float x0, float x1, float y, float r) =>
         new(new System.Drawing.RectangleF(x0 - r, y - r, MathF.Max(0, x1 - x0) + 2 * r, 2 * r), r, r);
