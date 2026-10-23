@@ -37,7 +37,7 @@ public sealed class TimelineRenderer : IOverlayRenderer
         this.settings = settings;
     }
 
-    public volatile PlaybackClock? Clock;
+    public volatile IEditorClock? Clock;
     /// <summary>For demos: the true song position at a wall time, to show the clock's error.</summary>
     public volatile Func<double, double>? TruthAt;
     private volatile bool showLayoutFrame;

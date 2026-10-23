@@ -6,6 +6,7 @@ using Overlay.Core.Beatmap;
 using Overlay.Core.Clock;
 using Overlay.Core.Settings;
 using Overlay.Core.Timeline;
+using Overlay.Sources.Memory;
 using Overlay.Sources.Mock;
 using Overlay.Sources.Tosu;
 
@@ -27,8 +28,11 @@ public sealed class AppController : IDisposable
     private readonly DispatcherTimer reloadTimer;
 
     private ITimeSource? source;
+    /// <summary>tosu: the time source itself, or (with the memory source) just for the open map and skin.</summary>
+    private TosuTimeSource? tosu;
+    private MemoryTimeSource? memory;
     private volatile SourceStatus status = SourceStatus.Disconnected;
-    private volatile PlaybackClock clock = new();
+    private volatile IEditorClock clock = new PlaybackClock();
     private int sampleCount;
 
     private BeatmapInfo? openBeatmap;
@@ -142,7 +146,7 @@ public sealed class AppController : IDisposable
         ChooseDifficulty(items[((i + step) % items.Count + items.Count) % items.Count]);
     }
 
-    public PlaybackClock Clock => clock;
+    public IEditorClock Clock => clock;
     public IReadOnlyList<DifficultyInfo> Difficulties => difficulties;
     public DifficultyInfo? Selected => selected;
 
@@ -152,19 +156,35 @@ public sealed class AppController : IDisposable
     {
         Settings.Source = kind;
         if (source is IDisposable d) d.Dispose();
+        if (tosu != source) tosu?.Dispose();
         source = null;
+        tosu = null;
+        memory = null;
         status = SourceStatus.Disconnected;
         Renderer.TruthAt = null;
         ResetClock();
 
-        if (kind == TimeSourceKind.Tosu)
+        if (kind is TimeSourceKind.Tosu or TimeSourceKind.Memory)
         {
-            var tosu = new TosuTimeSource(wall);
-            Attach(tosu);
+            // tosu provides the open map and skin either way; with Memory, the time and game state come from osu! directly.
+            tosu = new TosuTimeSource(wall);
             tosu.SkinChanged += folder => ui.BeginInvoke(() => LoadSkin(folder));
             tosu.Error += LogSourceError;
-            tosu.Start();
-            source = tosu;
+            if (kind == TimeSourceKind.Memory)
+            {
+                memory = new MemoryTimeSource(wall, tosu);
+                memory.Error += LogSourceError;
+                Attach(memory);
+                tosu.Start();
+                memory.Start();
+                source = memory;
+            }
+            else
+            {
+                Attach(tosu);
+                tosu.Start();
+                source = tosu;
+            }
         }
         else if (Renderer.Beatmap is { } map)
         {
@@ -212,7 +232,8 @@ public sealed class AppController : IDisposable
 
     private void ResetClock()
     {
-        clock = new PlaybackClock();
+        // osu!'s memory is fresh every couple of ms and needs only a light clock; tosu's 10 Hz samples need the full estimator.
+        clock = Settings.Source == TimeSourceKind.Memory ? new DirectClock() : new PlaybackClock();
         Renderer.Clock = clock;
         AttachTraceToClock();
     }
@@ -546,7 +567,17 @@ public sealed class AppController : IDisposable
         if (!Settings.Enabled) return ("Overlay switched off (tray menu or hotkey to turn it on).", Health.Waiting, false);
         if (Settings.Source == TimeSourceKind.Demo) return ("Demo mode: simulated editor playback.", Health.Ok, false);
         var st = status;
-        if (!st.Connected)
+        if (Settings.Source == TimeSourceKind.Memory)
+        {
+            if (!osu.OsuRunning) return ("osu! isn't running.", Health.Waiting, false);
+            if (memory?.Problem is { } problem) return ($"Can't read the editor's time: {problem}.", Health.Problem, false);
+            if (!st.Connected) return ("Reading osu!'s memory…", Health.Waiting, false);
+            if (tosu?.Status.Connected != true)
+                return tosuProcessRunning
+                    ? ("Connecting to tosu (for the open map and skin)…", Health.Waiting, false)
+                    : ("tosu isn't running. Start it for the open map and skin.", Health.Problem, true);
+        }
+        else if (!st.Connected)
             return tosuProcessRunning
                 ? ("Connecting to tosu…", Health.Waiting, false)
                 : ("tosu isn't running. Start it to read the editor's time.", Health.Problem, true);
@@ -587,7 +618,7 @@ public sealed class AppController : IDisposable
     /// <summary>On launch: if the overlay reads from tosu and tosu isn't running, start it (when we know where it is).</summary>
     private void StartTosuIfNeeded()
     {
-        if (Settings.Source != TimeSourceKind.Tosu) return;
+        if (Settings.Source == TimeSourceKind.Demo) return;
         var running = Process.GetProcessesByName("tosu");
         bool isRunning = running.Length > 0;
         foreach (var p in running) p.Dispose();
@@ -598,7 +629,13 @@ public sealed class AppController : IDisposable
     {
         var sb = new StringBuilder();
         var st = status;
-        sb.AppendLine($"source     {(Settings.Source == TimeSourceKind.Tosu ? "tosu" : "demo")}: {(st.Connected ? st.StateName : "not connected (is tosu running?)")}");
+        sb.AppendLine(Settings.Source switch
+        {
+            TimeSourceKind.Memory => $"source     osu! memory: {(st.Connected ? st.StateName : memory?.Problem ?? "osu! not found")}; " +
+                                     $"tosu (map, skin): {(tosu?.Status.Connected == true ? "connected" : "not connected")}",
+            TimeSourceKind.Tosu => $"source     tosu: {(st.Connected ? st.StateName : "not connected (is tosu running?)")}",
+            _ => "source     demo",
+        });
         sb.AppendLine($"osu!       {(osu.OsuRunning ? (osu.ClientRect is { } c ? $"window {c.Width}x{c.Height} at {c.X},{c.Y}" : "minimised") : "not found")}" +
                       $"{(osu.OsuOrUsInForeground ? ", focused" : "")}");
         sb.AppendLine($"overlay    {(Overlay.Visible ? "shown" : "hidden")} on {Overlay.AdapterName}");
@@ -704,6 +741,7 @@ public sealed class AppController : IDisposable
         followTimer.Stop();
         foreach (var w in watchers.Values) w.Dispose();
         if (source is IDisposable d) d.Dispose();
+        if (tosu != source) tosu?.Dispose();
         Overlay.Dispose();
         ManiaOverlay.Dispose();
         ManiaTint.Dispose();

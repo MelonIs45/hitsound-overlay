@@ -62,7 +62,7 @@ public sealed class PlaybackClockOptions
 /// are eased in without ever reversing motion. A sample far from the prediction starts a new segment (a seek).
 /// When paused (reported by the source, or two identical samples in a row), the clock shows the last sample exactly.
 /// </remarks>
-public sealed class PlaybackClock
+public sealed class PlaybackClock : IEditorClock
 {
     private readonly PlaybackClockOptions options;
     private readonly object gate = new();

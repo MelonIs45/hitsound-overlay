@@ -4,7 +4,11 @@ using Overlay.Core.Timeline;
 
 namespace Overlay.Core.Settings;
 
-public enum TimeSourceKind { Tosu, Demo }
+/// <summary>
+/// Where the editor's time comes from: <see cref="Memory"/> reads it from osu!'s memory every millisecond (with tosu
+/// still providing the open map and skin); <see cref="Tosu"/> takes everything from tosu (10 updates a second).
+/// </summary>
+public enum TimeSourceKind { Tosu, Demo, Memory }
 
 /// <summary>How the std objects are shown.</summary>
 public enum TimelineStyle
@@ -26,7 +30,7 @@ public enum HotkeyAction
 /// <summary>Everything the user can adjust. Saved as JSON (see <see cref="SettingsStore"/>).</summary>
 public sealed class OverlaySettings
 {
-    public TimeSourceKind Source { get; set; } = TimeSourceKind.Tosu;
+    public TimeSourceKind Source { get; set; } = TimeSourceKind.Memory;
     public TimelineStyle Style { get; set; } = TimelineStyle.OsuTimeline;
     /// <summary>Master switch (tray menu / hotkey). When off, the overlay stays hidden even in the editor.</summary>
     public bool Enabled { get; set; } = true;

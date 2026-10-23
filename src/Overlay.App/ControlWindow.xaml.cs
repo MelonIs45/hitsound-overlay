@@ -108,7 +108,7 @@ public partial class ControlWindow : Window
     public void ShowSource(TimeSourceKind kind)
     {
         loading = true;
-        SourceBox.SelectedIndex = kind == TimeSourceKind.Tosu ? 0 : 1;
+        SourceBox.SelectedIndex = Array.IndexOf(SourceOrder, kind);
         loading = false;
     }
 
@@ -147,7 +147,10 @@ public partial class ControlWindow : Window
     }
 
     private void SourceBox_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
-        Changed(() => app.SetSource(SourceBox.SelectedIndex == 0 ? TimeSourceKind.Tosu : TimeSourceKind.Demo));
+        Changed(() => app.SetSource(SourceOrder[Math.Max(0, SourceBox.SelectedIndex)]));
+
+    /// <summary>The time sources in the order of the Time source list.</summary>
+    private static readonly TimeSourceKind[] SourceOrder = { TimeSourceKind.Memory, TimeSourceKind.Tosu, TimeSourceKind.Demo };
 
     private void DifficultyBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {

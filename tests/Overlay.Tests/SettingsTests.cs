@@ -14,7 +14,7 @@ public class SettingsTests : IDisposable
     public void Missing_file_gives_defaults()
     {
         var s = SettingsStore.Load(File());
-        Assert.Equal(TimeSourceKind.Tosu, s.Source);
+        Assert.Equal(TimeSourceKind.Memory, s.Source);
         Assert.Equal(OverlayPlacement.Default, s.Placement);
         Assert.Equal("Ctrl+Alt+O", s.Hotkeys[HotkeyAction.ToggleOverlay]);
     }

@@ -24,6 +24,7 @@
 
             <TextBlock Text="Time source" VerticalAlignment="Center"/>
             <ComboBox x:Name="SourceBox" Grid.Column="1" Margin="0,2" SelectionChanged="SourceBox_SelectionChanged">
+                <ComboBoxItem Content="osu! editor (reads osu!'s memory)"/>
                 <ComboBoxItem Content="osu! editor (via tosu)"/>
                 <ComboBoxItem Content="Demo (simulated editor)"/>
             </ComboBox>
