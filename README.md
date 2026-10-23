@@ -34,7 +34,8 @@ editor's song position, so you can map an osu!mania difficulty against the std m
    an unnumbered hit circle at slider ends, `reversearrow` on repeats, and the skin's combo colours if the map has
    none), with slider bodies as tall as the hit circle; they fade out towards the timeline's
    ends like osu!'s own, and are hidden while an osu!standard map is open (osu! draws those itself).
-   osu!'s beat ticks are drawn over the objects, as in the std editor (they follow the open map's timing and saved snap).
+   osu!'s beat ticks are drawn over the circles, slider and spinner bodies, as in the std editor (they follow the open
+   map's timing and saved snap). Slider repeats get an unnumbered hit circle under the reverse arrow.
    The ½ and ¼ tick colours are measured; ⅓, ⅙, ⅛, 1/12 and 1/16 are approximate.
 4. **Mania column tint:** the mania playfield's columns get a faint overlay in the std map's combo colours, stepping to
    the next colour at the columns listed under *Mania playfield* (default 3, 5, 7, 11, 15, 17: columns 1–2, 3–4, 5–6,

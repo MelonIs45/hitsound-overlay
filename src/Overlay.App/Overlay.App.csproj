@@ -26,7 +26,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>OsuTimelineOverlay</AssemblyName>
-    <Version>1.2.0</Version>
+    <Version>1.2.1</Version>
     <Product>hitsound-overlay</Product>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- The manifest's per-monitor DPI setting is for the WPF windows and the Win32 overlay, not Windows Forms. -->
