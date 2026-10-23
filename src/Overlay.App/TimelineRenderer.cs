@@ -52,6 +52,13 @@ public sealed class TimelineRenderer : IOverlayRenderer
     private SkinImages? activeSkin;
     /// <summary>Beat snap for the grid: the editor's, as saved in the open map.</summary>
     public volatile int BeatSnap = 4;
+    /// <summary>
+    /// Timing of the map open in the editor (osu! draws its beat ticks from it), for redrawing those ticks over the
+    /// objects. Null: the std map's timing.
+    /// </summary>
+    public volatile TimingModel? EditorTiming;
+    /// <summary>Horizontal extents of the objects drawn this frame (for drawing osu!'s ticks over them).</summary>
+    private readonly List<(float From, float To)> drawnSpans = new();
     public volatile string? Message;
 
     public FrameStats Stats { get; } = new();
@@ -123,6 +130,7 @@ public sealed class TimelineRenderer : IOverlayRenderer
         if (!ReferenceEquals(skin, activeSkin)) { activeSkin?.Dispose(); activeSkin = skin; } // GPU objects die on this thread
         double skinScale = editor != null ? h * editor.SkinScaleFraction : r / 61.25;
         DrawObjects(dc, s!, layout, now, from, to, laneY, r, w, h, fadeAtEnds: editor != null, skin, skinScale);
+        if (editor != null) DrawEditorTicks(dc, editor, EditorTiming ?? s!.Beatmap.Timing, layout, now, from, to, h);
         if (editor == null) dc.DrawLine(nowLine.Item1, nowLine.Item2, Brush(255, 204, 34), 2);
 
         var truth = TruthAt;
@@ -164,6 +172,36 @@ public sealed class TimelineRenderer : IOverlayRenderer
         }
     }
 
+    /// <summary>
+    /// osu!'s beat ticks, redrawn where they cross an object, so they show on top of the objects as in the std editor.
+    /// Elsewhere osu!'s own ticks already show through.
+    /// </summary>
+    private void DrawEditorTicks(ID2D1DeviceContext dc, EditorTimelineView view, TimingModel timing, TimelineLayout layout,
+        double now, double from, double to, float h)
+    {
+        if (drawnSpans.Count == 0) return;
+        drawnSpans.Sort((a, b) => a.From.CompareTo(b.From));
+        float px = 96f / dc.Dpi.Width; // one physical pixel, in drawing units
+        float bottom = MathF.Round(h * (float)view.TickBottomFraction / px) * px;
+        byte alpha = (byte)Math.Round(EditorTimeline.TickOpacity * 255);
+        int span = 0;
+        foreach (var tick in BeatGrid.Ticks(timing, from, to, BeatSnap))
+        {
+            float x = (float)layout.TimeToX(tick.Time, now);
+            while (span < drawnSpans.Count && drawnSpans[span].To < x) span++;
+            bool covered = false;
+            for (int i = span; i < drawnSpans.Count && drawnSpans[i].From <= x; i++)
+                if (drawnSpans[i].To >= x) { covered = true; break; }
+            if (!covered) continue;
+
+            double fraction = tick.IsBarLine ? view.BarTickFraction : tick.Denominator == 1 ? view.BeatTickFraction : view.SubTickFraction;
+            float len = MathF.Round(h * (float)fraction / px) * px;
+            float column = MathF.Floor(x / px) * px;
+            var (cr, cg, cb) = EditorTimeline.TickColour(tick.Denominator);
+            dc.FillRectangle(new Rect(column, bottom - len, px, len), Brush(cr, cg, cb, alpha));
+        }
+    }
+
     // ---- hit objects ----
 
     private void DrawObjects(ID2D1DeviceContext dc, Scene s, TimelineLayout layout, double now, double from, double to,
@@ -177,6 +215,7 @@ public sealed class TimelineRenderer : IOverlayRenderer
         var (first, end) = s.Index.Query(from, to);
 
         int drawn = 0;
+        drawnSpans.Clear();
         // Later objects first, so earlier ones (the next to be hit) end up on top, as in the editor.
         for (int i = end - 1; i >= first; i--)
         {
@@ -195,6 +234,7 @@ public sealed class TimelineRenderer : IOverlayRenderer
             if (skin == null || !DrawSkinned(dc, skin, o, x0, x1, laneY, skinScale, c))
                 DrawVector(dc, o, x0, x1, laneY, r, c);
 
+            drawnSpans.Add((x0 - r, x1 + r));
             drawn++;
         }
         LastDrawn = (drawn, first, end, from, to);

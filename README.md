@@ -3,7 +3,8 @@
 Shows an osu!standard difficulty's hit objects as a timeline strip on top of the osu! editor, locked to the
 editor's song position, so you can map an osu!mania difficulty against the std map.
 
-- Works at every editor speed (25 / 50 / 75 / 100 %), through pauses and seeks.
+- Reads the editor's time straight from osu!'s memory, about every millisecond, so it follows play, pauses, seeks and
+  scrolling within a frame or two, at every editor speed (25 / 50 / 75 / 100 %).
 - Pick any std difficulty of the open set, or pin a std map from another folder.
 - Re-reads the std map when you save it.
 - Follows the osu! window; hides when you leave the editor or switch to another program.
@@ -11,8 +12,9 @@ editor's song position, so you can map an osu!mania difficulty against the std m
 ## Requirements
 
 - Windows 10/11, **osu! stable** (lazer isn't supported).
-- [tosu](https://github.com/tosuapp/tosu) running. The overlay reads the editor's time, state and open beatmap from
-  tosu's local WebSocket (`ws://127.0.0.1:24050`). Run only one copy of tosu.
+- [tosu](https://github.com/tosuapp/tosu) running, for the open beatmap and your skin (from its local WebSocket,
+  `ws://127.0.0.1:24050`). Run only one copy of tosu. The editor's time and osu!'s state are read from osu!'s memory
+  directly (read-only); under **Time source** you can switch back to taking everything from tosu.
 - .NET 8 SDK to build.
 
 ## Use
@@ -32,6 +34,8 @@ editor's song position, so you can map an osu!mania difficulty against the std m
    an unnumbered hit circle at slider ends, `reversearrow` on repeats, and the skin's combo colours if the map has
    none), with slider bodies as tall as the hit circle; they fade out towards the timeline's
    ends like osu!'s own, and are hidden while an osu!standard map is open (osu! draws those itself).
+   osu!'s beat ticks are drawn over the objects, as in the std editor (they follow the open map's timing and saved snap).
+   The ½ and ¼ tick colours are measured; ⅓, ⅙, ⅛, 1/12 and 1/16 are approximate.
 4. **Mania column tint:** the mania playfield's columns get a faint overlay in the std map's combo colours, stepping to
    the next colour at the columns listed under *Mania playfield* (default 3, 5, 7, 11, 15, 17: columns 1–2, 3–4, 5–6,
    7–10, 11–14, 15–16 and 17–18 each get their own colour). The playfield position was measured on an 18-key map at
@@ -39,7 +43,7 @@ editor's song position, so you can map an osu!mania difficulty against the std m
 5. Turn on **Layout mode** to drag and resize the strip; its position is kept relative to the osu! window.
 6. **Calibrate the offset once**: play at 100 % and nudge the offset until the objects stay put when you pause (or
    line up with osu!'s ticks while playing). The offset is in ms of real time, so it stays right at the slower speeds too.
-7. **Space and the mouse wheel** (both on by default, each with a checkbox): while osu!'s editor has focus the overlay
+7. **Space and the mouse wheel** (only with the tosu time source; both on by default, each with a checkbox): while osu!'s editor has focus the overlay
    notices Space (play/pause) and plain wheel scrolls (seeks), so it starts, stops and follows seeks at once instead of
    waiting for tosu's next report. Space is read by polling just that key; the wheel through Windows raw input; neither
    is a hook, nothing is blocked, and nothing is read while osu! isn't focused.
@@ -66,7 +70,13 @@ and defaults are used. Unexpected errors are written to `crash.log` in the same 
 
 ## How it stays in sync
 
-tosu reports the editor's time about 10 times a second (its minimum poll interval is 100 ms), with 0–40 ms of delivery
+By default the overlay reads osu!'s song time and game state from its memory, read-only, finding them with the same
+byte signatures tosu uses. osu! updates the time every frame (about every 2 ms in the editor), and the overlay reads it
+about every millisecond. `DirectClock` shows that value exactly while paused or after a seek, and while playing
+follows a line fitted over the last half second (speed snapped to the editor speeds), so motion is smooth between
+osu!'s updates; a pause shows within ~25 ms. It never writes to osu!'s memory.
+
+With the tosu time source instead: tosu reports the editor's time about 10 times a second (its minimum poll interval is 100 ms), with 0–40 ms of delivery
 jitter that comes in bursts. `PlaybackClock` predicts the position for every frame: it fits the playback speed and snaps
 it to the editor speeds, takes the phase from the least-delayed samples, and treats a sample far from the prediction as
 a seek. Measured on recorded tosu data, the predicted position wanders by under 1 ms at 100 % speed. Seeks show up
@@ -94,11 +104,12 @@ record every frame and tosu sample around each Space press and wheel-scroll burs
 | Project | Contents |
 |---|---|
 | `src/Overlay.Core` | .osu parser and timing model, `PlaybackClock`, timeline layout and beat grid, settings |
-| `src/Overlay.Sources` | tosu WebSocket source; simulated editor and tosu for tests and the demo |
+| `src/Overlay.Sources` | osu! memory reader; tosu WebSocket source; simulated editor and tosu for tests and the demo |
 | `src/Overlay.App` | Win32/Direct2D overlay window, WPF settings window, tray icon, hotkeys |
 | `tests/Overlay.Tests` | parser checked against osu!lazer's decoder, clock simulations, and a replay of a real tosu recording (not included in the repo; those tests skip without `TestData/tosu-run1.csv`, which `spikes/m0/TosuProbe` can record) |
 | `tools/LazerOracle` | regenerates the parser's reference files with osu!lazer's decoder |
 | `spikes/m0` | the tosu feasibility probe and its findings |
+| `spikes/memory` | probe that finds osu!'s time and state in its memory and compares them with tosu |
 
 ## Note
 

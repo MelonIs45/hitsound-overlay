@@ -272,12 +272,22 @@ public sealed class AppController : IDisposable
     private void ReadEditorSnap()
     {
         DifficultyInfo? header = null;
+        TimingModel? timing = null;
         if (openBeatmap != null)
         {
             var path = Path.Combine(openBeatmap.BeatmapFolder, openBeatmap.BeatmapFile);
-            try { if (File.Exists(path)) header = DifficultyDiscovery.ReadHeader(path); }
+            try
+            {
+                if (File.Exists(path))
+                {
+                    header = DifficultyDiscovery.ReadHeader(path);
+                    timing = OsuFileParser.ParseFile(path).Timing; // osu! draws its beat ticks from the open map's timing
+                }
+            }
             catch (IOException) { RestartReloadTimer(); return; } // mid-save; read again shortly
+            catch (FormatException) { } // the ticks then follow the std map's timing
         }
+        Renderer.EditorTiming = timing is { Sections.Count: > 0 } ? timing : null;
         editorSnap = header?.BeatDivisor;
         editorZoom = header?.TimelineZoom;
         openIsStandard = header?.Mode == 0;

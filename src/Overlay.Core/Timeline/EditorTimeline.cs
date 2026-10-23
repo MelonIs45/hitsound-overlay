@@ -28,6 +28,28 @@ public static class EditorTimeline
     /// </summary>
     private const double SkinPxPerImagePx = CircleRadius / 61.25;
 
+    // Beat ticks: 1 px wide, standing on the strip's bottom line, drawn over the objects (measured in the std editor at
+    // 1/4 snap: rows 187–198 for a beat). Their colours are about 88 % opaque.
+    private const double TickBottom = 199;
+    private const double BeatTickHeight = 12, BarTickHeight = 24, SubTickHeight = 7;
+    public const double TickOpacity = 0.88;
+
+    /// <summary>
+    /// A beat tick's colour for its snap (1 = whole beat, 2 = 1/2, ...). White, red and blue are measured; the others
+    /// follow osu!lazer's palette (unverified in stable).
+    /// </summary>
+    public static (byte R, byte G, byte B) TickColour(int denominator) => denominator switch
+    {
+        1 => (255, 255, 255),
+        2 => (255, 0, 0),
+        4 => (50, 128, 255),
+        3 => (170, 90, 255),
+        6 => (230, 180, 40),
+        8 => (255, 220, 40),
+        12 => (190, 150, 40),
+        _ => (120, 60, 200),
+    };
+
     // Objects fade out towards both ends of the timeline. Measured opacity against distance (calibrated px) of the
     // object's centre from the strip's end; beyond the last point they're fully opaque.
     private static readonly (double Distance, double Alpha)[] EdgeFade =
@@ -73,8 +95,17 @@ public static class EditorTimeline
         LaneFraction: (CircleY - StripTop) / (StripBottom - StripTop),
         RadiusFraction: CircleRadius / (StripBottom - StripTop),
         WidthsPerMs: PxPerMsAtZoom1 * timelineZoom / (StripRight - StripLeft),
-        SkinScaleFraction: SkinPxPerImagePx / (StripBottom - StripTop));
+        SkinScaleFraction: SkinPxPerImagePx / (StripBottom - StripTop),
+        TickBottomFraction: (TickBottom - StripTop) / (StripBottom - StripTop),
+        BeatTickFraction: BeatTickHeight / (StripBottom - StripTop),
+        BarTickFraction: BarTickHeight / (StripBottom - StripTop),
+        SubTickFraction: SubTickHeight / (StripBottom - StripTop));
 }
 
-/// <summary>See <see cref="EditorTimeline.View"/>. <paramref name="SkinScaleFraction"/>: strip heights per @1x skin image pixel.</summary>
-public sealed record EditorTimelineView(double NowFraction, double LaneFraction, double RadiusFraction, double WidthsPerMs, double SkinScaleFraction);
+/// <summary>
+/// See <see cref="EditorTimeline.View"/>. <paramref name="SkinScaleFraction"/>: strip heights per @1x skin image pixel.
+/// The tick fractions: where beat ticks stand and how tall they are (whole beat, first beat of a measure, finer snaps),
+/// in strip heights.
+/// </summary>
+public sealed record EditorTimelineView(double NowFraction, double LaneFraction, double RadiusFraction, double WidthsPerMs,
+    double SkinScaleFraction, double TickBottomFraction, double BeatTickFraction, double BarTickFraction, double SubTickFraction);
