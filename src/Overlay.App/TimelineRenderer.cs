@@ -62,7 +62,7 @@ public sealed class TimelineRenderer : IOverlayRenderer
     /// osu!'s ticks over them.
     /// </summary>
     private readonly List<float> drawnCircles = new();
-    /// <summary>Slider bodies drawn this frame (between head and tail centres), where ticks are drawn too.</summary>
+    /// <summary>Slider and spinner bodies drawn this frame (between head and tail centres), where ticks are drawn too.</summary>
     private readonly List<(float From, float To)> drawnBodies = new();
     public volatile string? Message;
 
@@ -179,8 +179,8 @@ public sealed class TimelineRenderer : IOverlayRenderer
 
     /// <summary>
     /// osu!'s beat ticks, redrawn where they cross a circle (a hit circle, a slider's head, repeat or tail, a spinner's
-    /// ends) or a slider body, so they show on top as in the std editor. Not over spinner bodies; elsewhere osu!'s own
-    /// ticks show through.
+    /// ends) or a slider or spinner body, so they show on top as in the std editor. Elsewhere osu!'s own ticks show
+    /// through.
     /// </summary>
     private void DrawEditorTicks(ID2D1DeviceContext dc, EditorTimelineView view, TimingModel timing, TimelineLayout layout,
         double now, double from, double to, float h, float laneY, float r)
@@ -206,7 +206,7 @@ public sealed class TimelineRenderer : IOverlayRenderer
             bool covered = false;
             for (int i = first; i < drawnCircles.Count && drawnCircles[i] <= x + halfWidth; i++)
                 if (MathF.Abs(drawnCircles[i] - x) <= halfWidth) { covered = true; break; }
-            // Slider bodies are as tall as the circles, so between head and tail they cover the tick.
+            // Slider and spinner bodies are as tall as the circles, so between head and tail they cover the tick.
             for (int i = 0; !covered && i < drawnBodies.Count && drawnBodies[i].From <= x; i++)
                 if (drawnBodies[i].To >= x) covered = true;
             if (!covered) continue;
@@ -251,12 +251,13 @@ public sealed class TimelineRenderer : IOverlayRenderer
                 DrawVector(dc, o, x0, x1, laneY, r, c);
 
             drawnCircles.Add(x0);
-            if (o.Kind is HitObjectKind.Slider or HitObjectKind.Spinner) drawnCircles.Add(x1);
-            if (o.Kind == HitObjectKind.Slider)
+            if (o.Kind is HitObjectKind.Slider or HitObjectKind.Spinner)
             {
+                drawnCircles.Add(x1);
                 drawnBodies.Add((x0, x1));
-                for (int k = 1; k < o.Slides; k++) drawnCircles.Add(RepeatX(o, x0, x1, k));
             }
+            if (o.Kind == HitObjectKind.Slider)
+                for (int k = 1; k < o.Slides; k++) drawnCircles.Add(RepeatX(o, x0, x1, k));
             drawn++;
         }
         LastDrawn = (drawn, first, end, from, to);
